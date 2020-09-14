@@ -111,6 +111,22 @@ using namespace ExchangeModels;
       virtual void scheduleInitialize(const LevelP& level,
                                       SchedulerP&);
 
+      void actuallyInitialize(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse* new_dw);
+
+      void initializeSubTask_hydrostaticAdj(const ProcessorGroup*,
+          const PatchSubset*,
+          const MaterialSubset*,
+          DataWarehouse*,
+          DataWarehouse* new_dw);
+
+      void hydrostaticPressureAdjustment(const Patch* patch,
+          const CCVariable<double>& rho_micro_CC,
+          CCVariable<double>& press_CC);
+
       virtual void scheduleRestartInitialize(const LevelP& level,
                                              SchedulerP& sched);
 
@@ -122,105 +138,258 @@ using namespace ExchangeModels;
       virtual void scheduleTimeAdvance( const LevelP& level,
                                         SchedulerP&);
 
-      virtual void scheduleFinalizeTimestep(const LevelP& level, 
-                                            SchedulerP&);
+      
+      void scheduleMaxMach_on_Lodi_BC_Faces(SchedulerP&,
+          const LevelP&,
+          const MaterialSet*);
 
-      virtual void scheduleAnalysis(const LevelP& level, SchedulerP&);
+      void maxMach_on_Lodi_BC_Faces(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
+
+      void scheduleComputeThermoTransportProperties(SchedulerP&,
+          const LevelP& level,
+          const MaterialSet*);
+
+      void computeThermoTransportProperties(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* ice_matls,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
 
       void scheduleComputePressure(SchedulerP&,
-                                   const PatchSet*,
-                                   const MaterialSubset*,
-                                   const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSet*);
 
+      void computeEquilPressure_1_matl(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
+
+      void computeEquilibrationPressure(const ProcessorGroup*,
+          const PatchSubset* patch,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleComputeTempFC(SchedulerP&,
-                                 const PatchSet*,
-                                 const MaterialSubset*,
-                                 const MaterialSubset*,
-                                 const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void computeTempFC(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset*,
+          DataWarehouse*,
+          DataWarehouse*);
+
+      template<class T> void computeTempFace(CellIterator it,
+          IntVector adj_offset,
+          constCCVariable<double>& rho_CC,
+          constCCVariable<double>& Temp_CC,
+          T& Temp_FC);
+
+      void scheduleComputeModelSources(SchedulerP& sched,
+          const LevelP& level,
+          const MaterialSet* matls);
+
+      void zeroModelSources(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
+
+      void scheduleUpdateVolumeFraction(SchedulerP& sched,
+          const LevelP& level,
+          const MaterialSubset* press_matl,
+          const MaterialSet* matls);
+
+      void updateVolumeFraction(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleComputeVel_FC(SchedulerP&,
-                                 const PatchSet*,           
-                                 const MaterialSubset*,     
-                                 const MaterialSubset*,     
-                                 const MaterialSubset*,     
-                                 const MaterialSet*);       
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void computeVel_FC(const ProcessorGroup*,
+          const PatchSubset*,
+          const MaterialSubset*,
+          DataWarehouse*,
+          DataWarehouse*);
+
+      template<class T> void computeVelFace(int dir, CellIterator it,
+          IntVector adj_offset,
+          double dx,
+          double delT,
+          double gravity,
+          constCCVariable<double>& rho_CC,
+          constCCVariable<double>& sp_vol_CC,
+          constCCVariable<Vector>& vel_CC,
+          constCCVariable<double>& press_CC,
+          T& vel_FC,
+          T& gradP_FC,
+          bool include_acc);
 
       void scheduleComputeDelPressAndUpdatePressCC(SchedulerP&,
-                                                    const PatchSet*,
-                                                    const MaterialSubset*,
-                                                    const MaterialSubset*,
-                                                    const MaterialSubset*,
-                                                    const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void computeDelPressAndUpdatePressCC(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleComputePressFC(SchedulerP&,
                                   const PatchSet*,
                                   const MaterialSubset*,
                                   const MaterialSet*);
 
-      void scheduleComputeThermoTransportProperties(SchedulerP&,
-                                                    const LevelP& level,
-                                                    const MaterialSet*);
+      void computePressFC(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
-      void scheduleVelTau_CC( SchedulerP&,
-                              const PatchSet*,
-                              const MaterialSet* );
+      template<class T> void computePressFace(CellIterator it,
+          IntVector adj_offset,
+          constCCVariable<double>& sum_rho,
+          constCCVariable<double>& press_CC,
+          T& press_FC);
 
-      void scheduleViscousShearStress( SchedulerP&,
-                                       const PatchSet*,
-                                       const MaterialSet*);
+      void scheduleVelTau_CC(SchedulerP&,
+          const PatchSet*,
+          const MaterialSet*);
 
+      void VelTau_CC(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* ice_matls,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
+
+      void computeVelTau_CCFace(const Patch* patch,
+          const Patch::FaceType face,
+          constCCVariable<Vector>& vel_CC,
+          CCVariable<Vector>& velTau_CC);
+
+      void scheduleViscousShearStress(SchedulerP&,
+          const PatchSet*,
+          const MaterialSet*);
+
+      void viscousShearStress(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* ice_matls,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
 
       void scheduleAccumulateMomentumSourceSinks(SchedulerP&,
-                                            const PatchSet*,
-                                            const MaterialSubset*,
-                                            const MaterialSubset*,
-                                            const MaterialSubset*,
-                                            const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void accumulateMomentumSourceSinks(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleAccumulateEnergySourceSinks(SchedulerP&,
-                                            const PatchSet*,
-                                            const MaterialSubset*,
-                                            const MaterialSubset*,
-                                            const MaterialSubset*,
-                                            const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void accumulateEnergySourceSinks(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleComputeLagrangianValues(SchedulerP&,
-                                           const PatchSet*,
-                                           const MaterialSet*);
+          const PatchSet*,
+          const MaterialSet*);
+
+      void computeLagrangianValues(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleComputeLagrangianSpecificVolume(SchedulerP&,
-                                                   const PatchSet*,
-                                                   const MaterialSubset*,
-                                                   const MaterialSubset*,
-                                                   const MaterialSubset*,
-                                                   const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSubset*,
+          const MaterialSet*);
 
-      void scheduleMaxMach_on_Lodi_BC_Faces(SchedulerP&,
-                                            const LevelP&,
-                                            const MaterialSet*);
-
-      void computesRequires_AMR_Refluxing(Task* t,
-                                          const MaterialSet* ice_matls);
+      void computeLagrangianSpecificVolume(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
 
       void scheduleAdvectAndAdvanceInTime(SchedulerP&,
-                                          const PatchSet*,
-                                          const MaterialSubset*,
-                                          const MaterialSet*);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void advectAndAdvanceInTime(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
+
+      void computesRequires_AMR_Refluxing(Task* t,
+          const MaterialSet* ice_matls);
 
       void scheduleConservedtoPrimitive_Vars(SchedulerP& sched,
-                                             const PatchSet* patch_set,
-                                             const MaterialSubset* ice_matlsub,
-                                             const MaterialSet* ice_matls,
-                                             const std::string& where);
+          const PatchSet* patch_set,
+          const MaterialSubset* ice_matlsub,
+          const MaterialSet* ice_matls,
+          const std::string& where);
+
+      void conservedtoPrimitive_Vars(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset*,
+          DataWarehouse* old_dw,
+          DataWarehouse* new_dw);
+
+      virtual void scheduleFinalizeTimestep(const LevelP& level,
+          SchedulerP&);
+
+      //_____________________________________________________________________
+      //    functions outside time loop
 
       void scheduleTestConservation(SchedulerP&,
-                                    const PatchSet*,
-                                    const MaterialSubset*,
-                                    const MaterialSet*);
-                                    
-      void scheduleComputeTaskGraphIndex( SchedulerP& sched,
-                                          const LevelP& level);
+          const PatchSet*,
+          const MaterialSubset*,
+          const MaterialSet*);
+
+      void TestConservation(const ProcessorGroup*,
+          const PatchSubset* patches,
+          const MaterialSubset* matls,
+          DataWarehouse*,
+          DataWarehouse*);
+
+      void scheduleComputeTaskGraphIndex(SchedulerP& sched,
+          const LevelP& level);
 
 //__________________________________
 //__________________________________
@@ -274,6 +443,7 @@ using namespace ExchangeModels;
                                          const MaterialSubset* ice_matls,
                                          const MaterialSubset* mpm_matls,
                                          const MaterialSet* all_matls);
+
 //__________________________________
 //  I M P L I C I T   A M R I C E
       void scheduleCoarsen_delP(SchedulerP& sched,
@@ -318,13 +488,6 @@ using namespace ExchangeModels;
 
 //__________________________________
 //   M O D E L S
-      void scheduleComputeModelSources(SchedulerP& sched,
-                                       const LevelP& level,
-                                       const MaterialSet* matls);
-      void scheduleUpdateVolumeFraction(SchedulerP& sched,
-                                        const LevelP& level,
-                                        const MaterialSubset* press_matl,
-                                        const MaterialSet* matls);
 
       void scheduleComputeLagrangian_Transported_Vars(SchedulerP& sched,
                                                       const PatchSet* patches,
@@ -338,75 +501,19 @@ using namespace ExchangeModels;
          d_with_rigid_mpm = true;
        };
 
-
-      void actuallyInitialize(const ProcessorGroup*,
-                              const PatchSubset* patches,
-                              const MaterialSubset* matls,
-                              DataWarehouse*,
-                              DataWarehouse* new_dw);
-
-      void initializeSubTask_hydrostaticAdj(const ProcessorGroup*,
-                                            const PatchSubset*,
-                                            const MaterialSubset*,
-                                            DataWarehouse*,
-                                            DataWarehouse* new_dw);
-
+   
       void actuallyComputeStableTimestep(const ProcessorGroup*,
                                          const PatchSubset* patch,
                                          const MaterialSubset* matls,
                                          DataWarehouse*,
                                          DataWarehouse*);
 
-      void computeEquilibrationPressure(const ProcessorGroup*,
-                                        const PatchSubset* patch,
-                                        const MaterialSubset* matls,
-                                        DataWarehouse*,
-                                        DataWarehouse*);
-
-
-      void computeEquilPressure_1_matl(const ProcessorGroup*,
-                                       const PatchSubset* patches,
-                                       const MaterialSubset* matls,
-                                       DataWarehouse* old_dw,
-                                       DataWarehouse* new_dw);
-
-      void computeVel_FC(const ProcessorGroup*,
-                         const PatchSubset*,
-                         const MaterialSubset*,
-                         DataWarehouse*,
-                         DataWarehouse*);
-
       void updateVel_FC(const ProcessorGroup*,
                         const PatchSubset*,
                         const MaterialSubset*,
                         DataWarehouse*,
                         DataWarehouse*,
-                        bool);
-
-      void computeTempFC(const ProcessorGroup*,
-                         const PatchSubset* patches,
-                         const MaterialSubset*,
-                         DataWarehouse*,
-                         DataWarehouse*);
-
-      template<class T> void computeTempFace(CellIterator it,
-                                            IntVector adj_offset,
-                                            constCCVariable<double>& rho_CC,
-                                            constCCVariable<double>& Temp_CC,
-                                            T& Temp_FC);
-
-      template<class T> void computeVelFace(int dir, CellIterator it,
-                                            IntVector adj_offset,
-                                            double dx,
-                                            double delT, 
-                                            double gravity,
-                                            constCCVariable<double>& rho_CC,
-                                            constCCVariable<double>& sp_vol_CC,
-                                            constCCVariable<Vector>& vel_CC,
-                                            constCCVariable<double>& press_CC,
-                                            T& vel_FC,
-                                            T& gradP_FC,
-                                            bool include_acc);
+                        bool); 
 
       template<class T> void updateVelFace(int dir, CellIterator it,
                                             IntVector adj_offset,
@@ -416,96 +523,14 @@ using namespace ExchangeModels;
                                             constCCVariable<double>& press_CC,
                                             T& vel_FC,
                                             T& grad_dp_FC);
-
-      void computeDelPressAndUpdatePressCC(const ProcessorGroup*,
-                                           const PatchSubset* patches,
-                                           const MaterialSubset* matls,
-                                           DataWarehouse*,
-                                           DataWarehouse*);
-
-      void computePressFC(const ProcessorGroup*,
-                          const PatchSubset* patches,
-                          const MaterialSubset* matls,
-                          DataWarehouse*,
-                          DataWarehouse*);
-
-      template<class T> void computePressFace(CellIterator it,
-                                              IntVector adj_offset,
-                                              constCCVariable<double>& sum_rho,
-                                              constCCVariable<double>& press_CC,
-                                              T& press_FC);
-
-      void computeThermoTransportProperties(const ProcessorGroup*,
-                                            const PatchSubset* patches,
-                                            const MaterialSubset* ice_matls,
-                                            DataWarehouse* old_dw,
-                                            DataWarehouse* new_dw);
-
-      void VelTau_CC(const ProcessorGroup*,
-                     const PatchSubset* patches,
-                     const MaterialSubset* ice_matls,
-                     DataWarehouse* old_dw,
-                     DataWarehouse* new_dw);
-
-      void computeVelTau_CCFace( const Patch* patch,
-                                 const Patch::FaceType face,
-                                 constCCVariable<Vector>& vel_CC,
-                                 CCVariable<Vector>& velTau_CC );
-
-      void viscousShearStress(const ProcessorGroup*,
-                              const PatchSubset* patches,
-                              const MaterialSubset* ice_matls,
-                              DataWarehouse* old_dw,
-                              DataWarehouse* new_dw);
-
-      void accumulateMomentumSourceSinks(const ProcessorGroup*,
-                                         const PatchSubset* patches,
-                                         const MaterialSubset* matls,
-                                         DataWarehouse*,
-                                         DataWarehouse*);
-
-      void accumulateEnergySourceSinks(const ProcessorGroup*,
-                                       const PatchSubset* patches,
-                                       const MaterialSubset* matls,
-                                       DataWarehouse*,
-                                       DataWarehouse*);
-
-
-      void computeLagrangianValues(const ProcessorGroup*,
-                                   const PatchSubset* patches,
-                                   const MaterialSubset* matls,
-                                   DataWarehouse*,
-                                   DataWarehouse*);
-
-      void computeLagrangianSpecificVolume(const ProcessorGroup*,
-                                           const PatchSubset* patches,
-                                           const MaterialSubset* matls,
-                                           DataWarehouse*,
-                                           DataWarehouse*);
-
-      void maxMach_on_Lodi_BC_Faces(const ProcessorGroup*,
-                                    const PatchSubset* patches,
-                                    const MaterialSubset* matls,
-                                    DataWarehouse* old_dw,
-                                    DataWarehouse* new_dw);
-
-      void advectAndAdvanceInTime(const ProcessorGroup*,
-                                  const PatchSubset* patches,
-                                  const MaterialSubset* matls,
-                                  DataWarehouse*,
-                                  DataWarehouse*);
-
-      void conservedtoPrimitive_Vars(const ProcessorGroup*,
-                                     const PatchSubset* patches,
-                                     const MaterialSubset*,
-                                     DataWarehouse* old_dw,
-                                     DataWarehouse* new_dw);
                                      
       void computeTaskGraphIndex(const ProcessorGroup*,
                                  const PatchSubset* patches,
                                  const MaterialSubset*,
                                  DataWarehouse* old_dw,
                                  DataWarehouse* new_dw);
+
+      virtual void scheduleAnalysis(const LevelP& level, SchedulerP&);
 
 //__________________________________
 //  I M P L I C I T   I C E
@@ -602,39 +627,14 @@ using namespace ExchangeModels;
 
 //__________________________________
 //   M O D E L S
-
-      void zeroModelSources(const ProcessorGroup*,
-                            const PatchSubset* patches,
-                            const MaterialSubset* matls,
-                            DataWarehouse*,
-                            DataWarehouse*);
-
-      void updateVolumeFraction(const ProcessorGroup*,
-                                const PatchSubset* patches,
-                                const MaterialSubset* matls,
-                                DataWarehouse*,
-                                DataWarehouse*);
-
-
-      void computeLagrangian_Transported_Vars(const ProcessorGroup*,
+    void computeLagrangian_Transported_Vars(const ProcessorGroup*,
                                               const PatchSubset* patches,
                                               const MaterialSubset* matls,
                                               DataWarehouse* old_dw,
                                               DataWarehouse* new_dw);
 
 //__________________________________
-//   O T H E R
-
-      void TestConservation(const ProcessorGroup*,
-                            const PatchSubset* patches,
-                            const MaterialSubset* matls,
-                            DataWarehouse*,
-                            DataWarehouse*);
-
-      void hydrostaticPressureAdjustment(const Patch* patch,
-                                         const CCVariable<double>& rho_micro_CC,
-                                         CCVariable<double>& press_CC);
-
+//   O T H E R   
       IntVector upwindCell_X(const IntVector& c,
                              const double& var,
                              double is_logical_R_face );
