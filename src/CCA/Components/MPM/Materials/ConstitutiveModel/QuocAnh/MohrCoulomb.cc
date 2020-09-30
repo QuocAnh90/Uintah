@@ -1188,7 +1188,7 @@ int Flavour=int(UI[5]);
 	double a1=UI[15];
 	double b1=UI[16];
 	double W=UI[17];
-	double beta=UI[18];
+	double beta1=UI[18];
 	double strain_ref=UI[19];
     
     double Use_softening=UI[34];
@@ -1241,7 +1241,7 @@ if (Usetransition>0)
 {
 
 	if(shear_strain_rate_nonlocal >strain_ref){
-	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta);
+	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta1);
 	}
 	    else{
 	    c=St*a1*pow(W,-b1);
