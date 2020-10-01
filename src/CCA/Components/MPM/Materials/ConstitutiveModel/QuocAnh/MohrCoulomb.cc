@@ -971,10 +971,11 @@ void MohrCoulomb::computePressEOSCM(double rho_cur, double& pressure,
   pressure = p_ref + p_g;
   dp_drho  = bulk*rho_orig/(rho_cur*rho_cur);
   tmp = bulk/rho_cur;  // speed of sound squared
-
+  /*
 #if 1
   cout << "NO VERSION OF computePressEOSCM EXISTS YET FOR MohrCoulomb" << endl;
 #endif
+*/
 }
 
 double MohrCoulomb::getCompressibility()
