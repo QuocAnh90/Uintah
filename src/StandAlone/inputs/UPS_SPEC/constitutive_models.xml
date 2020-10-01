@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='ISO-8859-1' ?>
+<?xml version='1.0' encoding='utf-8' ?>
 <Uintah_Include>
 
   <constitutive_model              spec="REQUIRED NO_DATA"
@@ -1056,7 +1056,7 @@
     <A1                spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <B1                spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <W                 spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
-    <beta1¨                spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+    <beta1             spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <strain_ref        spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 
     <Usemodul  		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
