@@ -264,7 +264,7 @@ using std::cerr; using namespace Uintah;
 MohrCoulomb::MohrCoulomb(ProblemSpecP& ps,MPMFlags* Mflag)
   : ConstitutiveModel(Mflag)
 {
-  d_NBASICINPUTS=48;
+  d_NBASICINPUTS=52;
   d_NMGDC=0;
 
 // Total number of properties
@@ -279,10 +279,8 @@ MohrCoulomb::MohrCoulomb(ProblemSpecP& ps,MPMFlags* Mflag)
 
   // Check that model parameters are valid and allow model to change if needed
 
-
   //DMMCHK(UI,UI,&UI[d_NBASICINPUTS]);
   CheckModel (UI);
-
 
   //Create VarLabels for GeoModel internal state variables (ISVs)
   int nx;
@@ -291,10 +289,8 @@ MohrCoulomb::MohrCoulomb(ProblemSpecP& ps,MPMFlags* Mflag)
     for (int i=0;i<nx;i++)
     {
         rinit[i]=UI[i];
-        //cerr<<" UI["<<i<<"]="<<UI[i];
     }
   d_NINSV=nx;
-  //  cout << "d_NINSV = " << d_NINSV <<l endl;
 
   initializeLocalMPMLabels();
 }
@@ -335,13 +331,10 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
 
    cm_ps->appendElement("suction",UI[6]);
   cm_ps->appendElement("UseWaterRetention",UI[7]);
-
-
   cm_ps->appendElement("WR_Param1",UI[8]);
   cm_ps->appendElement("WR_Param2",UI[9]);
   cm_ps->appendElement("WR_Param3",UI[10]);
   cm_ps->appendElement("WR_Param4",UI[11]);
-
   cm_ps->appendElement("SpecVol",UI[12]);  // meridional yld prof param
 
   cm_ps->appendElement("PhiB",UI[13]);  // Fredlund shear angle, c=c+suction*tan(phib)
@@ -349,7 +342,7 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
   cm_ps->appendElement("A1",UI[15]);	// water influence parameter
   cm_ps->appendElement("B1",UI[16]);	// water influence parameter
   cm_ps->appendElement("W",UI[17]);	// water content
-  cm_ps->appendElement("beta1",UI[18]);	// strain rate influence parameter
+  cm_ps->appendElement("beta",UI[18]);	// strain rate influence parameter
   cm_ps->appendElement("strain_ref",UI[19]); // shear strain rate reference
   cm_ps->appendElement("shear_strain_rate",UI[20]); // shear strain rate
   cm_ps->appendElement("Usemodul",UI[21]); // modul with strain rate
@@ -357,11 +350,9 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
   cm_ps->appendElement("nuy",UI[23]); // modul ratio
   cm_ps->appendElement("shear_strain",UI[24]);
 
-
   cm_ps->appendElement("Use_linear",UI[25]);
   cm_ps->appendElement("a",UI[26]);
   cm_ps->appendElement("y_ref",UI[27]);
-
 
   cm_ps->appendElement("strain11",UI[28]);
   cm_ps->appendElement("strain22",UI[29]);
@@ -384,12 +375,15 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
     cm_ps->appendElement("Use_regular",UI[42]);
     cm_ps->appendElement("tFE",UI[43]);
     cm_ps->appendElement("tShear",UI[44]);
-
     cm_ps->appendElement("s_xy",UI[45]);
 
 	cm_ps->appendElement("n_nonlocalMC", UI[46]);
 	cm_ps->appendElement("l_nonlocal", UI[47]);
 
+    cm_ps->appendElement("Use_friction", UI[48]);
+    cm_ps->appendElement("strain_rate1", UI[49]);
+    cm_ps->appendElement("strain_rate2", UI[50]);
+    cm_ps->appendElement("Phi_CS", UI[51]);
 }
 
 MohrCoulomb* MohrCoulomb::clone()
@@ -971,11 +965,10 @@ void MohrCoulomb::computePressEOSCM(double rho_cur, double& pressure,
   pressure = p_ref + p_g;
   dp_drho  = bulk*rho_orig/(rho_cur*rho_cur);
   tmp = bulk/rho_cur;  // speed of sound squared
-  /*
+
 #if 1
   cout << "NO VERSION OF computePressEOSCM EXISTS YET FOR MohrCoulomb" << endl;
 #endif
-*/
 }
 
 double MohrCoulomb::getCompressibility()
@@ -1006,7 +999,7 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
   ps->getWithDefault("A1",UI[15],0.0); 	// water influence parameter
   ps->getWithDefault("B1",UI[16],0.0); 	// water influence parameter
   ps->getWithDefault("W",UI[17],0.0); 	// water content
-  ps->getWithDefault("beta1",UI[18],0.0); 	// strain rate influence parameter
+  ps->getWithDefault("beta",UI[18],0.0); 	// strain rate influence parameter
   ps->getWithDefault("strain_ref",UI[19],0.0); 	// strain rate influence parameter
   ps->getWithDefault("shear_strain_rate",UI[20],0.0); 	// strain rate influence parameter
   ps->getWithDefault("Usemodul",UI[21],0.0);
@@ -1044,6 +1037,11 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
 
 	ps->getWithDefault("n_nonlocalMC", UI[46], 0.0);
 	ps->getWithDefault("l_nonlocal", UI[47], 0.0);
+
+    ps->getWithDefault("Use_friction", UI[48], 0.0);
+    ps->getWithDefault("strain_rate1", UI[49], 0.0);
+    ps->getWithDefault("strain_rate2", UI[50], 0.0);
+    ps->getWithDefault("Phi_CS", UI[51], 0.0);
 }
 
 void
@@ -1071,7 +1069,7 @@ MohrCoulomb::initializeLocalMPMLabels()
   ISVNames.push_back("A1");
   ISVNames.push_back("B1");
   ISVNames.push_back("W");
-  ISVNames.push_back("beta1");
+  ISVNames.push_back("beta");
   ISVNames.push_back("strain_ref");
   ISVNames.push_back("shear_strain_rate");
   ISVNames.push_back("Usemodul");
@@ -1189,7 +1187,7 @@ int Flavour=int(UI[5]);
 	double a1=UI[15];
 	double b1=UI[16];
 	double W=UI[17];
-	double beta1=UI[18];
+	double beta=UI[18];
 	double strain_ref=UI[19];
     
     double Use_softening=UI[34];
@@ -1200,6 +1198,12 @@ int Flavour=int(UI[5]);
     double a=UI[26];
     double y_ref=UI[27];
     double y=svarg[37];
+
+    double Use_friction = UI[48];
+    double strain_rate1 = UI[49];
+    double strain_rate2 = UI[50];
+    double Phi_CS = UI[51];
+    double Phi_P = UI[3];
 
 /*
 Flavour
@@ -1240,9 +1244,8 @@ for (int i=0; i<6; i++)
 double Usetransition=UI[14];
 if (Usetransition>0)
 {
-
 	if(shear_strain_rate_nonlocal >strain_ref){
-	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta1);
+	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta);
 	}
 	    else{
 	    c=St*a1*pow(W,-b1);
@@ -1258,7 +1261,6 @@ if(Use_linear>0)
 double Usemodul=UI[21];
 if(Usemodul>0)
 {
-
     G=m_modul*c/2.0/(1.0+nuy);
     K=m_modul*c/3.0/(1.0-2*nuy);
 }
@@ -1269,6 +1271,18 @@ if(Use_softening>0)
     if(shear_strain_nonlocal>c/G)
     {
         c = c * (1.0/St+(1.0-1.0/St)*pow(2.71,(-3.0*shear_strain_nonlocal /strain_95)));
+    }
+}
+
+if (Use_friction > 0)
+{
+    if (shear_strain_rate_nonlocal > strain_rate1 && shear_strain_rate_nonlocal< strain_rate2)
+    {
+        Phi = Phi_P - (shear_strain_rate_nonlocal - strain_rate1) * (Phi_P - Phi_CS) / (strain_rate2 - strain_rate1);
+    }
+    else if (shear_strain_rate_nonlocal > strain_rate2)
+    {
+        Phi = Phi_CS;
     }
 }
 
@@ -1307,7 +1321,6 @@ SpecVol=svarg[12];
 svarg[0]=G;
 svarg[1]=K;
 svarg[2]=c;
-
 
 int Region;
 

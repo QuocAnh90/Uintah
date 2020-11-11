@@ -321,6 +321,164 @@ void MPMICE::scheduleInitialize(const LevelP& level,
 }
 
 //______________________________________________________________________
+//       A C T U A L   S T E P S :
+//______________________________________________________________________
+void MPMICE::actuallyInitialize(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse*,
+    DataWarehouse* new_dw)
+{
+    timeStep_vartype timeStep;
+    new_dw->get(timeStep, VarLabel::find(timeStep_name));
+
+    bool isNotInitialTimeStep = (timeStep > 0);
+
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing actuallyInitialize ");
+        //__________________________________
+        //output material indices
+        if (patch->getID() == 0) {
+            cout << "Materials Indicies:   MPM [" << *(m_materialManager->allMaterials("MPM")) << "] "
+                << "ICE[" << *(m_materialManager->allMaterials("ICE")) << "]" << endl;
+
+            cout << "Material Names:";
+            unsigned int numAllMatls = m_materialManager->getNumMatls();
+            for (unsigned int m = 0; m < numAllMatls; m++) {
+                Material* matl = m_materialManager->getMaterial(m);
+                cout << " " << matl->getDWIndex() << ") " << matl->getName();
+            }
+            cout << "\n";
+        }
+
+        // Sum variable for testing that the volume fractions sum to 1
+        CCVariable<double> vol_frac_sum;
+        new_dw->allocateTemporary(vol_frac_sum, patch);
+        vol_frac_sum.initialize(0.0);
+
+        //__________________________________
+        //  Initialize CCVaribles for MPM Materials
+        //  Even if mass = 0 in a cell you still need
+        //  CC Variables defined.
+        double junk = -9, tmp;
+        unsigned int numMPM_matls = m_materialManager->getNumMatls("MPM");
+        double p_ref = d_ice->getRefPress();
+        for (unsigned int m = 0; m < numMPM_matls; m++) {
+            CCVariable<double> rho_micro, sp_vol_CC, rho_CC, Temp_CC, speedSound, vol_frac_CC;
+            CCVariable<Vector> vel_CC;
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+            new_dw->allocateTemporary(rho_micro, patch);
+            // Allocate volume fraction for use in intializeCCVariables
+            new_dw->allocateTemporary(vol_frac_CC, patch);
+            new_dw->allocateAndPut(sp_vol_CC, Ilb->sp_vol_CCLabel, indx, patch);
+            new_dw->allocateAndPut(rho_CC, Ilb->rho_CCLabel, indx, patch);
+            new_dw->allocateAndPut(speedSound, Ilb->speedSound_CCLabel, indx, patch);
+            new_dw->allocateAndPut(Temp_CC, MIlb->temp_CCLabel, indx, patch);
+            new_dw->allocateAndPut(vel_CC, MIlb->vel_CCLabel, indx, patch);
+
+
+            CCVariable<double> heatFlux;
+            new_dw->allocateAndPut(heatFlux, Mlb->heatRate_CCLabel, indx, patch);
+            heatFlux.initialize(0.0);
+
+            mpm_matl->initializeCCVariables(rho_micro, rho_CC,
+                Temp_CC, vel_CC,
+                vol_frac_CC, patch);
+
+            setBC(rho_CC, "Density", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(rho_micro, "Density", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(Temp_CC, "Temperature", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(vel_CC, "Velocity", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            for (CellIterator iter = patch->getExtraCellIterator();
+                !iter.done(); iter++) {
+                IntVector c = *iter;
+                sp_vol_CC[c] = 1.0 / rho_micro[c];
+
+                mpm_matl->getConstitutiveModel()->
+                    computePressEOSCM(rho_micro[c], junk, p_ref, junk, tmp, mpm_matl, Temp_CC[c]);
+                speedSound[c] = sqrt(tmp);
+
+                // sum volume fraction
+                vol_frac_sum[c] += vol_frac_CC[c];
+            }
+
+            //__________________________________
+            //    B U L L E T   P R O O F I N G
+            IntVector neg_cell;
+            ostringstream warn;
+            if (!areAllValuesPositive(rho_CC, neg_cell)) {
+                Point pt = patch->getCellPosition(neg_cell);
+                warn << "ERROR MPMICE::actuallyInitialize, mat " << indx << " cell "
+                    << neg_cell << " position " << pt << " rho_CC is negative\n";
+                throw ProblemSetupException(warn.str(), __FILE__, __LINE__);
+            }
+            if (!areAllValuesPositive(Temp_CC, neg_cell)) {
+                Point pt = patch->getCellPosition(neg_cell);
+
+                warn << "ERROR MPMICE::actuallyInitialize, mat " << indx << " cell "
+                    << neg_cell << " position " << pt << " Temp_CC is negative\n";
+                throw ProblemSetupException(warn.str(), __FILE__, __LINE__);
+            }
+            if (!areAllValuesPositive(sp_vol_CC, neg_cell)) {
+                Point pt = patch->getCellPosition(neg_cell);
+
+                warn << "ERROR MPMICE::actuallyInitialize, mat " << indx << " cell "
+                    << neg_cell << " position " << pt << " sp_vol_CC is negative\n";
+                throw ProblemSetupException(warn.str(), __FILE__, __LINE__);
+            }
+            if (!areAllValuesNumbers(speedSound, neg_cell)) {
+                Point pt = patch->getCellPosition(neg_cell);
+
+                warn << "ERROR MPMICE::actuallyInitialize, mat " << indx << " cell "
+                    << neg_cell << " position " << pt << " speedSound is nan\n";
+                warn << "speedSound = " << speedSound[neg_cell] << " sp_vol_CC = " << sp_vol_CC[neg_cell]
+                    << " rho_micro = " << rho_micro[neg_cell] << " Temp_CC = " << Temp_CC[neg_cell] << endl;
+                throw ProblemSetupException(warn.str(), __FILE__, __LINE__);
+            }
+        }  // num_MPM_matls loop 
+
+        //___________________________________
+        //   B U L L E T  P R O O F I N G
+        // Verify volume fractions sum to 1.0
+        // Loop through ICE materials to get their contribution to volume fraction
+        unsigned int numICE_matls = m_materialManager->getNumMatls("ICE");
+        for (unsigned int m = 0; m < numICE_matls; m++) {
+            constCCVariable<double> vol_frac;
+            ICEMaterial* ice_matl = (ICEMaterial*)m_materialManager->getMaterial("ICE", m);
+            int indx = ice_matl->getDWIndex();
+
+            // Get the Volume Fraction computed in ICE's actuallyInitialize(...)
+            new_dw->get(vol_frac, Ilb->vol_frac_CCLabel, indx, patch, Ghost::None, 0);
+
+            for (CellIterator iter = patch->getCellIterator(); !iter.done(); iter++) {
+                IntVector c = *iter;
+                vol_frac_sum[c] += vol_frac[c];
+            }
+        }  // num_ICE_matls loop
+
+        double errorThresholdTop = 1.0e0 + 1.0e-10;
+        double errorThresholdBottom = 1.0e0 - 1.0e-10;
+
+        for (CellIterator iter = patch->getCellIterator(); !iter.done(); iter++) {
+            IntVector c = *iter;
+            Point pt = patch->getCellPosition(c);
+
+            if (!(vol_frac_sum[c] <= errorThresholdTop && vol_frac_sum[c] >= errorThresholdBottom)) {
+                \
+                    ostringstream warn;
+                warn << "ERROR MPMICE::actuallyInitialize cell " << *iter << " position" << pt << "\n\n"
+                    << "volume fraction (" << std::setprecision(13) << vol_frac_sum[*iter] << ") does not sum to 1.0 +- 1e-10.\n"
+                    << "Verify that this region of the domain contains at least 1 geometry object.  If you're using the optional\n"
+                    << "'volumeFraction' tags verify that they're correctly specified.\n";
+                throw ProblemSetupException(warn.str(), __FILE__, __LINE__);
+            }
+        } // cell iterator for volume fraction
+    } // Patch loop
+}
+
+//______________________________________________________________________
 //
 void MPMICE::scheduleRestartInitialize(const LevelP& level,
                                        SchedulerP& sched)
@@ -627,65 +785,1534 @@ MPMICE::scheduleTimeAdvance(const LevelP& inlevel, SchedulerP& sched)
   }
 } // end scheduleTimeAdvance()
 
-
-/* _____________________________________________________________________
-MPMICE::scheduleFinalizeTimestep--
-This task called at the very bottom of the timestep,
-after scheduleTimeAdvance and the scheduleCoarsen.  
-
-This is scheduled on every level.
-_____________________________________________________________________*/
-void
-MPMICE::scheduleFinalizeTimestep( const LevelP& level, SchedulerP& sched)
+// Start the schedule
+//______________________________________________________________________
+//
+void MPMICE::scheduleInterpolateNCToCC_0(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSubset* one_matl,
+    const MaterialSet* mpm_matls)
 {
-  cout_doing << "----------------------------"<<endl;
-  cout_doing << d_myworld->myRank() << " MPMICE::scheduleFinalizeTimestep\t\t\t\tL-" <<level->getIndex()<< endl;
-  
-  const PatchSet* ice_patches = level->eachPatch();
-  const MaterialSet* ice_matls = m_materialManager->allMaterials( "ICE" );
-  const MaterialSet* all_matls = m_materialManager->allMaterials();
-  const MaterialSet* mpm_matls = m_materialManager->allMaterials( "MPM" );
-  const MaterialSubset* ice_matls_sub = ice_matls->getUnion();
-                                                          
-  d_ice->scheduleConservedtoPrimitive_Vars(sched, ice_patches,ice_matls_sub,
-                                                              ice_matls,
-                                                              "finalizeTimestep");
+    if (d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
+        getLevel(patches)->getGrid()->numLevels())) {
 
-  d_ice->scheduleTestConservation(        sched, ice_patches, ice_matls_sub,
-                                                             all_matls);
-  
-  if(d_analysisModules.size() != 0){
-    vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
-      AnalysisModule* am = *iter;
-      am->scheduleDoAnalysis_preReloc( sched, level);
-    }
-  }
-                                                              
-  // only do on finest level until we get AMR MPM
-  if (level->getIndex() == level->getGrid()->numLevels()-1)
-    sched->scheduleParticleRelocation(level,
-                                      Mlb->pXLabel_preReloc, 
-                                      d_mpm->d_particleState_preReloc,
-                                      Mlb->pXLabel,
-                                      d_mpm->d_particleState,
-                                      Mlb->pParticleIDLabel, mpm_matls);
-  
-  //__________________________________
-  //  on the fly analysis
-  if(d_analysisModules.size() != 0){
-    vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
-      AnalysisModule* am = *iter;
-      am->scheduleDoAnalysis( sched, level);
-    }
-  }
+        printSchedule(patches, cout_doing, "MPMICE::scheduleInterpolateNCToCC_0");
 
-  cout_doing << "---------------------------------------------------------"<<endl;
+        /* interpolateNCToCC */
+        Task* t = scinew Task("MPMICE::interpolateNCToCC_0",
+            this, &MPMICE::interpolateNCToCC_0);
+        const MaterialSubset* mss = mpm_matls->getUnion();
+        t->requires(Task::NewDW, Mlb->gMassLabel, Ghost::AroundCells, 1);
+        t->requires(Task::NewDW, Mlb->gVolumeLabel, Ghost::AroundCells, 1);
+        t->requires(Task::NewDW, Mlb->gVelocityBCLabel, Ghost::AroundCells, 1);
+        t->requires(Task::NewDW, Mlb->gTemperatureLabel, Ghost::AroundCells, 1);
+        t->requires(Task::NewDW, Mlb->gSp_volLabel, Ghost::AroundCells, 1);
+        t->requires(Task::OldDW, Mlb->NC_CCweightLabel, one_matl,
+            Ghost::AroundCells, 1);
+        t->requires(Task::OldDW, Ilb->sp_vol_CCLabel, Ghost::None, 0);
+        t->requires(Task::OldDW, MIlb->temp_CCLabel, Ghost::None, 0);
+
+        t->requires(Task::OldDW, Ilb->timeStepLabel);
+
+        t->computes(MIlb->cMassLabel);
+        t->computes(MIlb->vel_CCLabel);
+        t->computes(MIlb->temp_CCLabel);
+        t->computes(Ilb->sp_vol_CCLabel, mss);
+        t->computes(Ilb->rho_CCLabel, mss);
+
+        sched->addTask(t, patches, mpm_matls);
+    }
 }
 
+//______________________________________________________________________
+//
+void MPMICE::interpolateNCToCC_0(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw)
+{
+    timeStep_vartype timeStep;
+    old_dw->get(timeStep, VarLabel::find(timeStep_name));
+
+    bool isNotInitialTimeStep = (timeStep > 0);
+
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing interpolateNCToCC_0");
+
+        unsigned int numMatls = m_materialManager->getNumMatls("MPM");
+        Vector dx = patch->dCell();
+        double cell_vol = dx.x() * dx.y() * dx.z();
+        Ghost::GhostType  gac = Ghost::AroundCells;
+        Ghost::GhostType  gn = Ghost::None;
+
+        constNCVariable<double> NC_CCweight;
+        old_dw->get(NC_CCweight, Mlb->NC_CCweightLabel, 0, patch, gac, 1);
+
+        for (unsigned int m = 0; m < numMatls; m++) {
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+            // Create arrays for the grid data
+            constNCVariable<double> gmass, gvolume, gtemperature, gSp_vol;
+            constNCVariable<Vector> gvelocity;
+            CCVariable<double> cmass, Temp_CC, sp_vol_CC, rho_CC;
+            CCVariable<Vector> vel_CC;
+            constCCVariable<double> Temp_CC_ice, sp_vol_CC_ice;
+
+            new_dw->allocateAndPut(cmass, MIlb->cMassLabel, indx, patch);
+            new_dw->allocateAndPut(vel_CC, MIlb->vel_CCLabel, indx, patch);
+            new_dw->allocateAndPut(Temp_CC, MIlb->temp_CCLabel, indx, patch);
+            new_dw->allocateAndPut(sp_vol_CC, Ilb->sp_vol_CCLabel, indx, patch);
+            new_dw->allocateAndPut(rho_CC, Ilb->rho_CCLabel, indx, patch);
+
+            double very_small_mass = d_TINY_RHO * cell_vol;
+            cmass.initialize(very_small_mass);
+
+            new_dw->get(gmass, Mlb->gMassLabel, indx, patch, gac, 1);
+            new_dw->get(gvolume, Mlb->gVolumeLabel, indx, patch, gac, 1);
+            new_dw->get(gvelocity, Mlb->gVelocityBCLabel, indx, patch, gac, 1);
+            new_dw->get(gtemperature, Mlb->gTemperatureLabel, indx, patch, gac, 1);
+            new_dw->get(gSp_vol, Mlb->gSp_volLabel, indx, patch, gac, 1);
+            old_dw->get(sp_vol_CC_ice, Ilb->sp_vol_CCLabel, indx, patch, gn, 0);
+            old_dw->get(Temp_CC_ice, MIlb->temp_CCLabel, indx, patch, gn, 0);
+            IntVector nodeIdx[8];
+
+            //      double sp_vol_orig = 1.0/(mpm_matl->getInitialDensity());
+
+                  //__________________________________
+                  //  compute CC Variables
+            for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+                IntVector c = *iter;
+                patch->findNodesFromCell(*iter, nodeIdx);
+
+                double Temp_CC_mpm = 0.0;
+                double sp_vol_mpm = 0.0;
+                Vector vel_CC_mpm = Vector(0.0, 0.0, 0.0);
+
+                for (int in = 0; in < 8; in++) {
+                    double NC_CCw_mass = NC_CCweight[nodeIdx[in]] * gmass[nodeIdx[in]];
+                    cmass[c] += NC_CCw_mass;
+                    sp_vol_mpm += gSp_vol[nodeIdx[in]] * NC_CCw_mass;
+                    vel_CC_mpm += gvelocity[nodeIdx[in]] * NC_CCw_mass;
+                    Temp_CC_mpm += gtemperature[nodeIdx[in]] * NC_CCw_mass;
+                }
+                double inv_cmass = 1.0 / cmass[c];
+                vel_CC_mpm *= inv_cmass;
+                Temp_CC_mpm *= inv_cmass;
+                sp_vol_mpm *= inv_cmass;
+
+                //__________________________________
+                // set *_CC = to either vel/Temp_CC_mpm or some safe values
+                // depending upon if there is cmass.  You need
+                // a well defined vel/temp_CC even if there isn't any mass
+                // If you change this you must also change 
+                // MPMICE::computeLagrangianValuesMPM
+                double one_or_zero = (cmass[c] - very_small_mass) / cmass[c];
+
+                //        Temp_CC[c]  =(1.0-one_or_zero)*999.        + one_or_zero*Temp_CC_mpm;
+                //        sp_vol_CC[c]=(1.0-one_or_zero)*sp_vol_orig + one_or_zero*sp_vol_mpm;
+
+                Temp_CC[c] = (1.0 - one_or_zero) * Temp_CC_ice[c] + one_or_zero * Temp_CC_mpm;
+                sp_vol_CC[c] = (1.0 - one_or_zero) * sp_vol_CC_ice[c] + one_or_zero * sp_vol_mpm;
+
+                vel_CC[c] = vel_CC_mpm;
+                rho_CC[c] = cmass[c] / cell_vol;
+            }
+
+            //  Set BC's
+            setBC(Temp_CC, "Temperature", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(rho_CC, "Density", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(vel_CC, "Velocity", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            //  Set if symmetric Boundary conditions
+            setBC(cmass, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(sp_vol_CC, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+
+            //---- B U L L E T   P R O O F I N G------
+            // ignore BP if recompute time step has already been requested
+            IntVector neg_cell;
+            ostringstream warn;
+            bool rts = new_dw->recomputeTimeStep();
+
+            int L = getLevel(patches)->getIndex();
+            if (d_testForNegTemps_mpm) {
+                if (!areAllValuesPositive(Temp_CC, neg_cell) && !rts) {
+                    warn << "ERROR MPMICE:(" << L << "):interpolateNCToCC_0, mat " << indx
+                        << " cell "
+                        << neg_cell << " Temp_CC " << Temp_CC[neg_cell] << "\n ";
+                    throw InvalidValue(warn.str(), __FILE__, __LINE__);
+                }
+            }
+            if (!areAllValuesPositive(rho_CC, neg_cell) && !rts) {
+                warn << "ERROR MPMICE:(" << L << "):interpolateNCToCC_0, mat " << indx
+                    << " cell " << neg_cell << " rho_CC " << rho_CC[neg_cell] << "\n ";
+                throw InvalidValue(warn.str(), __FILE__, __LINE__);
+            }
+            if (!areAllValuesPositive(sp_vol_CC, neg_cell) && !rts) {
+                warn << "ERROR MPMICE:(" << L << "):interpolateNCToCC_0, mat " << indx
+                    << " cell "
+                    << neg_cell << " sp_vol_CC " << sp_vol_CC[neg_cell] << "\n ";
+                throw InvalidValue(warn.str(), __FILE__, __LINE__);
+            }
+        }
+    }  //patches
+}
+
+//This task is optional for multi-levelMPMICE
+//
+void MPMICE::scheduleCoarsenCC_0(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSet* mpm_matls)
+{
+    printSchedule(patches, cout_doing, "MPMICE::scheduleCoarsenCC_0");
+
+    bool modifies = false;
+
+    scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->cMassLabel,
+        1.9531e-15, modifies, "sum");
+
+    scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->temp_CCLabel,
+        0., modifies, "massWeighted");
+
+    scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->vel_CCLabel,
+        Vector(0, 0, 0), modifies, "massWeighted");
+
+    scheduleCoarsenVariableCC(sched, patches, mpm_matls, Ilb->sp_vol_CCLabel,
+        0.8479864471, modifies, "massWeighted");
+
+    scheduleCoarsenVariableCC(sched, patches, mpm_matls, Ilb->rho_CCLabel,
+        1.e-12, modifies, "std");
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleCoarsenNCMass(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSet* mpm_matls)
+{
+    printSchedule(patches, cout_doing, "MPMICE::scheduleCoarsenNCMass");
+
+    bool modifies = false;
+
+    scheduleCoarsenVariableNC(sched, patches, mpm_matls, Mlb->gMassLabel,
+        1.e-200, modifies, "sum");
+}
+
+/*_____________________________________________________________________
+ Function~  MPMICE::scheduleComputePressure--
+ Note:  Handles both Rate and Equilibration form of solution technique
+_____________________________________________________________________*/
+void MPMICE::scheduleComputePressure(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSubset* ice_matls,
+    const MaterialSubset* mpm_matls,
+    const MaterialSubset* press_matl,
+    const MaterialSet* all_matls)
+{
+    Task* t = nullptr;
+
+    printSchedule(patches, cout_doing, "MPMICE::scheduleComputeEquilibrationPressure");
+
+    t = scinew Task("MPMICE::computeEquilibrationPressure",
+        this, &MPMICE::computeEquilibrationPressure, press_matl);
+
+    t->requires(Task::OldDW, Ilb->timeStepLabel);
+    t->requires(Task::OldDW, Ilb->delTLabel, getLevel(patches));
+
+    // I C E
+    Ghost::GhostType  gn = Ghost::None;
+
+    t->requires(Task::OldDW, Ilb->temp_CCLabel, ice_matls, gn);
+    t->requires(Task::OldDW, Ilb->rho_CCLabel, ice_matls, gn);
+    t->requires(Task::OldDW, Ilb->sp_vol_CCLabel, ice_matls, gn);
+    t->requires(Task::NewDW, Ilb->specific_heatLabel, ice_matls, gn);
+    t->requires(Task::NewDW, Ilb->gammaLabel, ice_matls, gn);
+
+    // M P M
+    t->requires(Task::NewDW, MIlb->temp_CCLabel, mpm_matls, gn);
+    t->requires(Task::NewDW, Ilb->rho_CCLabel, mpm_matls, gn);
+    t->requires(Task::NewDW, Ilb->sp_vol_CCLabel, mpm_matls, gn);
+
+    t->requires(Task::OldDW, Ilb->press_CCLabel, press_matl, gn);
+    t->requires(Task::OldDW, Ilb->vel_CCLabel, ice_matls, gn);
+    t->requires(Task::NewDW, MIlb->vel_CCLabel, mpm_matls, gn);
+
+
+    computesRequires_CustomBCs(t, "EqPress", Ilb, ice_matls,
+        d_ice->d_BC_globalVars);
+
+    //  A L L _ M A T L S
+    t->computes(Ilb->f_theta_CCLabel);
+    t->computes(Ilb->compressibilityLabel, ice_matls);
+    t->computes(Ilb->compressibilityLabel, mpm_matls);
+
+    t->computes(Ilb->speedSound_CCLabel);
+    t->computes(Ilb->vol_frac_CCLabel);
+    t->computes(Ilb->sumKappaLabel, press_matl);
+    t->computes(Ilb->TMV_CCLabel, press_matl);
+    t->computes(Ilb->press_equil_CCLabel, press_matl);
+    t->computes(Ilb->sum_imp_delPLabel, press_matl);  // needed by implicit ICE
+    t->computes(Ilb->eq_press_itersLabel, press_matl);
+
+    t->modifies(Ilb->sp_vol_CCLabel, mpm_matls);
+    t->computes(Ilb->sp_vol_CCLabel, ice_matls);
+    t->computes(Ilb->rho_CCLabel, ice_matls);
+
+    sched->addTask(t, patches, all_matls);
+}
+
+/* ---------------------------------------------------------------------
+ Function~  MPMICE::computeEquilibrationPressure--
+ Reference: Flow of Interpenetrating Material Phases, J. Comp, Phys
+               18, 440-464, 1975, see the equilibration section
+
+ Steps
+ ----------------
+    - Compute rho_micro_CC, SpeedSound, vol_frac for ALL matls
+
+    For each cell
+    _ WHILE LOOP(convergence, max_iterations)
+        - compute the pressure and dp_drho from the EOS of each material.
+        - Compute delta Pressure
+        - Compute delta volume fraction and update the
+          volume fraction and the celldensity.
+        - Test for convergence of delta pressure and delta volume fraction
+    - END WHILE LOOP
+    - bulletproofing
+    end
+
+Note:  The nomenclature follows the reference.
+       This is identical to  ICE::computeEquilibrationPressure except
+       we now include EOS for MPM matls.
+_____________________________________________________________________*/
+void MPMICE::computeEquilibrationPressure(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw,
+    const MaterialSubset* press_matl)
+{
+    timeStep_vartype timeStep;
+    old_dw->get(timeStep, Ilb->timeStepLabel);
+
+    bool isNotInitialTimeStep = (timeStep > 0);
+
+    const Level* level = getLevel(patches);
+    int L_indx = level->getIndex();
+
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing computeEquilibrationPressure");
+
+        double    converg_coeff = 100.;
+        double    convergence_crit = converg_coeff * DBL_EPSILON;
+        double    c_2;
+        double press_ref = d_ice->getRefPress();
+        unsigned int numICEMatls = m_materialManager->getNumMatls("ICE");
+        unsigned int numMPMMatls = m_materialManager->getNumMatls("MPM");
+        unsigned int numALLMatls = numICEMatls + numMPMMatls;
+
+        Vector dx = patch->dCell();
+        double cell_vol = dx.x() * dx.y() * dx.z();
+
+        std::vector<double> press_eos(numALLMatls);
+        std::vector<double> dp_drho(numALLMatls), dp_de(numALLMatls);
+        std::vector<double> mat_volume(numALLMatls);
+
+        std::vector<CCVariable<double> > vol_frac(numALLMatls);
+        std::vector<CCVariable<double> > rho_micro(numALLMatls);
+        std::vector<CCVariable<double> > rho_CC_new(numALLMatls);
+        std::vector<CCVariable<double> > speedSound(numALLMatls);
+        std::vector<CCVariable<double> > sp_vol_new(numALLMatls);
+        std::vector<CCVariable<double> > f_theta(numALLMatls);
+        std::vector<CCVariable<double> > kappa(numALLMatls);
+
+        std::vector<constCCVariable<double> > placeHolder(0);
+        std::vector<constCCVariable<double> > cv(numALLMatls);
+        std::vector<constCCVariable<double> > gamma(numALLMatls);
+        std::vector<constCCVariable<double> > sp_vol_CC(numALLMatls);
+        std::vector<constCCVariable<double> > Temp(numALLMatls);
+        std::vector<constCCVariable<double> > rho_CC_old(numALLMatls);
+        std::vector<constCCVariable<double> > mass_CC(numALLMatls);
+        std::vector<constCCVariable<Vector> > vel_CC(numALLMatls);
+
+        constCCVariable<double> press;
+        CCVariable<double> press_new, delPress_tmp, sumKappa, TMV_CC;
+        CCVariable<double> sum_imp_delP;
+        CCVariable<int>  nIterations;
+
+        Ghost::GhostType  gn = Ghost::None;
+        //__________________________________
+        old_dw->get(press, Ilb->press_CCLabel, 0, patch, gn, 0);
+        new_dw->allocateAndPut(press_new, Ilb->press_equil_CCLabel, 0, patch);
+        new_dw->allocateAndPut(TMV_CC, Ilb->TMV_CCLabel, 0, patch);
+        new_dw->allocateAndPut(sumKappa, Ilb->sumKappaLabel, 0, patch);
+        new_dw->allocateAndPut(sum_imp_delP, Ilb->sum_imp_delPLabel, 0, patch);
+        new_dw->allocateAndPut(nIterations, Ilb->eq_press_itersLabel, 0, patch);
+        new_dw->allocateTemporary(delPress_tmp, patch);
+
+        sum_imp_delP.initialize(0.0);
+        nIterations.initialize(0);
+
+        std::vector<MPMMaterial*> mpm_matl(numALLMatls);
+        std::vector<ICEMaterial*> ice_matl(numALLMatls);
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            Material* matl = m_materialManager->getMaterial(m);
+            ice_matl[m] = dynamic_cast<ICEMaterial*>(matl);
+            mpm_matl[m] = dynamic_cast<MPMMaterial*>(matl);
+        }
+
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            Material* matl = m_materialManager->getMaterial(m);
+            int indx = matl->getDWIndex();
+            if (ice_matl[m]) {                    // I C E
+                old_dw->get(Temp[m], Ilb->temp_CCLabel, indx, patch, gn, 0);
+                old_dw->get(rho_CC_old[m], Ilb->rho_CCLabel, indx, patch, gn, 0);
+                old_dw->get(sp_vol_CC[m], Ilb->sp_vol_CCLabel, indx, patch, gn, 0);
+                old_dw->get(vel_CC[m], Ilb->vel_CCLabel, indx, patch, gn, 0);
+                new_dw->get(cv[m], Ilb->specific_heatLabel, indx, patch, gn, 0);
+                new_dw->get(gamma[m], Ilb->gammaLabel, indx, patch, gn, 0);
+                new_dw->allocateAndPut(rho_CC_new[m], Ilb->rho_CCLabel, indx, patch);
+            }
+            if (mpm_matl[m]) {                    // M P M
+                new_dw->get(Temp[m], MIlb->temp_CCLabel, indx, patch, gn, 0);
+                new_dw->get(vel_CC[m], MIlb->vel_CCLabel, indx, patch, gn, 0);
+                new_dw->get(sp_vol_CC[m], Ilb->sp_vol_CCLabel, indx, patch, gn, 0);
+                new_dw->get(rho_CC_old[m], Ilb->rho_CCLabel, indx, patch, gn, 0);
+                new_dw->allocateTemporary(rho_CC_new[m], patch);
+            }
+            new_dw->allocateTemporary(rho_micro[m], patch);
+            new_dw->allocateAndPut(vol_frac[m], Ilb->vol_frac_CCLabel, indx, patch);
+            new_dw->allocateAndPut(f_theta[m], Ilb->f_theta_CCLabel, indx, patch);
+            new_dw->allocateAndPut(speedSound[m], Ilb->speedSound_CCLabel, indx, patch);
+            new_dw->allocateAndPut(sp_vol_new[m], Ilb->sp_vol_CCLabel, indx, patch);
+            new_dw->allocateAndPut(kappa[m], Ilb->compressibilityLabel, indx, patch);
+        }
+
+        press_new.copyData(press);
+
+        //__________________________________
+        // Compute rho_micro, speedSound, volfrac, rho_CC
+        // see Docs/MPMICE.txt for explaination of why we ONlY
+        // use eos evaluations for rho_micro_mpm
+
+        for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+
+            const IntVector& c = *iter;
+            double total_mat_vol = 0.0;
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                if (ice_matl[m]) {                // I C E
+                    rho_micro[m][c] = 1.0 / sp_vol_CC[m][c];
+                }
+                else if (mpm_matl[m]) {                //  M P M
+                    rho_micro[m][c] = mpm_matl[m]->getConstitutiveModel()->
+                        computeRhoMicroCM(press_new[c], press_ref, mpm_matl[m], Temp[m][c], 1.0 / sp_vol_CC[m][c]);
+                }
+                mat_volume[m] = (rho_CC_old[m][c] * cell_vol) / rho_micro[m][c];
+                total_mat_vol += mat_volume[m];
+            }  // numAllMatls loop
+
+            TMV_CC[c] = total_mat_vol;
+
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                vol_frac[m][c] = mat_volume[m] / total_mat_vol;
+                rho_CC_new[m][c] = vol_frac[m][c] * rho_micro[m][c];
+            }
+        }  // cell iterator
+
+        //______________________________________________________________________
+        // Done with preliminary calcs, now loop over every cell
+        int count, test_max_iter = 0;
+
+        for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+            const IntVector& c = *iter;
+            double delPress = 0.;
+            bool converged = false;
+            double sum;
+            count = 0;
+            vector<EqPress_dbg> dbgEqPress;
+
+            while (count < d_ice->d_max_iter_equilibration && converged == false) {
+                count++;
+                //__________________________________
+                // evaluate press_eos at cell i,j,k
+                for (unsigned int m = 0; m < numALLMatls; m++) {
+                    if (ice_matl[m]) {    // ICE
+                        ice_matl[m]->getEOS()->computePressEOS(rho_micro[m][c], gamma[m][c],
+                            cv[m][c], Temp[m][c],
+                            press_eos[m],
+                            dp_drho[m], dp_de[m]);
+                    }
+                    else if (mpm_matl[m]) {    // MPM
+                        mpm_matl[m]->getConstitutiveModel()->
+                            computePressEOSCM(rho_micro[m][c], press_eos[m], press_ref,
+                                dp_drho[m], c_2, mpm_matl[m], Temp[m][c]);
+                    }
+                }
+
+                //__________________________________
+                // - compute delPress
+                // - update press_CC     
+                double A = 0., B = 0., C = 0.;
+
+                for (unsigned int m = 0; m < numALLMatls; m++) {
+                    double Q = press_new[c] - press_eos[m];
+                    double inv_y = (vol_frac[m][c] * vol_frac[m][c])
+                        / (dp_drho[m] * rho_CC_new[m][c] + d_SMALL_NUM);
+
+                    A += vol_frac[m][c];
+                    B += Q * inv_y;
+                    C += inv_y;
+                }
+                double vol_frac_not_close_packed = 1.;
+                delPress = (A - vol_frac_not_close_packed - B) / C;
+
+                press_new[c] += delPress;
+
+                if (press_new[c] < convergence_crit) {
+                    press_new[c] = fabs(delPress);
+                }
+
+                //__________________________________
+                // backout rho_micro_CC at this new pressure
+                // - compute the updated volume fractions
+                sum = 0;
+                for (unsigned int m = 0; m < numALLMatls; m++) {
+                    if (ice_matl[m]) {
+                        rho_micro[m][c] =
+                            ice_matl[m]->getEOS()->computeRhoMicro(press_new[c], gamma[m][c],
+                                cv[m][c], Temp[m][c], rho_micro[m][c]);
+                    } if (mpm_matl[m]) {
+                        rho_micro[m][c] =
+                            mpm_matl[m]->getConstitutiveModel()->computeRhoMicroCM(
+                                press_new[c], press_ref, mpm_matl[m], Temp[m][c], rho_micro[m][c]);
+                    }
+                    vol_frac[m][c] = rho_CC_new[m][c] / rho_micro[m][c];
+                    sum += vol_frac[m][c];
+                }
+
+                //__________________________________
+                // - Test for convergence 
+                //  If sum of vol_frac_CC ~= 1.0 then converged 
+                if (fabs(sum - vol_frac_not_close_packed) < convergence_crit) {
+                    converged = true;
+
+                    //__________________________________
+                    // Find the speed of sound based on the converged solution
+                    //feclearexcept(FE_ALL_EXCEPT);
+                    for (unsigned int m = 0; m < numALLMatls; m++) {
+                        if (ice_matl[m]) {
+                            ice_matl[m]->getEOS()->computePressEOS(rho_micro[m][c], gamma[m][c],
+                                cv[m][c], Temp[m][c], press_eos[m],
+                                dp_drho[m], dp_de[m]);
+
+                            c_2 = dp_drho[m] + dp_de[m] *
+                                (press_eos[m] / (rho_micro[m][c] * rho_micro[m][c]));
+                        }
+                        else if (mpm_matl[m]) {
+                            mpm_matl[m]->getConstitutiveModel()->
+                                computePressEOSCM(rho_micro[m][c], press_eos[m], press_ref,
+                                    dp_drho[m], c_2, mpm_matl[m], Temp[m][c]);
+                        }
+                        speedSound[m][c] = sqrt(c_2);         // Isentropic speed of sound
+
+                        //____ BB : B U L L E T   P R O O F I N G----
+                        // catch inf and nan speed sound values
+                        //if (fetestexcept(FE_INVALID) != 0 || c_2 == 0.0) {
+                        //  ostringstream warn;
+                        //  warn<<"ERROR MPMICE::computeEquilPressure, mat= "<< m << " cell= "
+                        //      << c << " sound speed is imaginary.\n";
+                        //  warn << "speedSound = " << speedSound[m][c] << " c_2 = " << c_2 
+                        //       << " press_eos = " << press_eos[m]
+                        //       << " dp_drho = " << dp_drho[m]
+                        //       << " dp_de = " << dp_de[m]
+                        //       << " rho_micro = " << rho_micro[m][c] << " Temp = " << Temp[m][c] << endl;
+                        //  throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
+                        //}
+                    }
+                }
+
+                // Save iteration data for output in case of crash
+                if (ds_EqPress.active()) {
+                    EqPress_dbg dbg;
+                    dbg.delPress = delPress;
+                    dbg.press_new = press_new[c];
+                    dbg.sumVolFrac = sum;
+                    dbg.count = count;
+
+                    for (unsigned int m = 0; m < numALLMatls; m++) {
+                        EqPress_dbgMatl dmatl;
+                        dmatl.press_eos = press_eos[m];
+                        dmatl.volFrac = vol_frac[m][c];
+                        dmatl.rhoMicro = rho_micro[m][c];
+                        dmatl.rho_CC = rho_CC_new[m][c];
+                        dmatl.temp_CC = Temp[m][c];
+                        dmatl.mat = m;
+                        dbg.matl.push_back(dmatl);
+                    }
+                    dbgEqPress.push_back(dbg);
+                }
+
+            }   // end of converged
+
+            delPress_tmp[c] = delPress;
+
+            //__________________________________
+            // If the pressure solution has stalled out 
+            //  then try a binary search.  Keep track ofthe number
+            // of iterations inside of the search.
+            int binaryPressCount = 0;
+
+            if (count >= d_ice->d_max_iter_equilibration) {
+                //int lev = patch->getLevel()->getIndex();
+                //cout << "WARNING:MPMICE:ComputeEquilibrationPressure "
+                //     << " Cell : " << c << " on level " << lev << " having a difficult time converging. \n"
+                //    << " Now performing a binary pressure search " << endl;
+
+                //int binaryPressCount;
+                binaryPressureSearch(Temp, rho_micro, vol_frac, rho_CC_new,
+                    speedSound, dp_drho, dp_de,
+                    press_eos, press, press_new, press_ref,
+                    cv, gamma, convergence_crit,
+                    numALLMatls, count, sum, c);
+                binaryPressCount = count;
+            }
+
+            nIterations[c] = count + binaryPressCount;
+            test_max_iter = std::max(test_max_iter, count);
+
+            //__________________________________
+            //      BULLET PROOFING
+            // ignore BP if time step recompute has already been requested
+            bool rts = new_dw->recomputeTimeStep();
+
+            string message;
+            bool allTestsPassed = true;
+            if (test_max_iter == d_ice->d_max_iter_equilibration && !rts) {
+                allTestsPassed = false;
+                message += "Max. iterations reached ";
+            }
+
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                ASSERT((vol_frac[m][c] > 0.0) || (vol_frac[m][c] < 1.0));
+            }
+
+            if (fabs(sum - 1.0) > convergence_crit && !rts) {
+                allTestsPassed = false;
+                message += " sum (volumeFractions) != 1 ";
+            }
+
+            if (press_new[c] < 0.0 && !rts) {
+                allTestsPassed = false;
+                message += " Computed pressure is < 0 ";
+            }
+
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                if ((rho_micro[m][c] < 0.0 || vol_frac[m][c] < 0.0) && !rts) {
+                    allTestsPassed = false;
+                    message += " rho_micro < 0 || vol_frac < 0";
+                }
+            }
+            if (allTestsPassed != true) {  // throw an exception of there's a problem
+                Point pt = patch->getCellPosition(c);
+
+                ostringstream warn;
+                warn << "\nMPMICE::ComputeEquilibrationPressure: Cell: " << c << ", position: " << pt << ", L-" << L_indx << "\n"
+                    << message
+                    << "\nThis usually means that something much deeper has gone wrong with the simulation. "
+                    << "\nCompute equilibration pressure task is rarely the problem. "
+                    << "For more debugging information set the environmental variable:  \n"
+                    << "   SCI_DEBUG DBG_EqPress:+\n\n";
+
+                warn << "INPUTS: \n";
+                for (unsigned int m = 0; m < numALLMatls; m++) {
+                    warn << "\n matl: " << m << "\n"
+                        << "   rho_CC:     " << rho_CC_new[m][c] << "\n"
+                        << "   Temperature:   " << Temp[m][c] << "\n";
+                }
+                if (ds_EqPress.active()) {
+                    warn << "\nDetails on iterations " << endl;
+                    vector<EqPress_dbg>::iterator dbg_iter;
+                    for (dbg_iter = dbgEqPress.begin(); dbg_iter != dbgEqPress.end(); dbg_iter++) {
+                        EqPress_dbg& d = *dbg_iter;
+                        warn << "Iteration:   " << d.count
+                            << "  press_new:   " << d.press_new
+                            << "  sumVolFrac:  " << d.sumVolFrac
+                            << "  delPress:    " << d.delPress << "\n";
+                        for (unsigned int m = 0; m < numALLMatls; m++) {
+                            warn << "  matl: " << d.matl[m].mat
+                                << "  press_eos:  " << d.matl[m].press_eos
+                                << "  volFrac:    " << d.matl[m].volFrac
+                                << "  rhoMicro:   " << d.matl[m].rhoMicro
+                                << "  rho_CC:     " << d.matl[m].rho_CC
+                                << "  Temp:       " << d.matl[m].temp_CC << "\n";
+                        }
+                    }
+                }
+            }  // all testsPassed
+        }  // end of cell interator
+        if (cout_norm.active())
+            cout_norm << "max number of iterations in any cell \t" << test_max_iter << endl;
+
+        //__________________________________
+        // Now change how rho_CC is defined to 
+        // rho_CC = mass/cell_volume  NOT mass/mat_volume 
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            if (ice_matl[m]) {
+                rho_CC_new[m].copyData(rho_CC_old[m]);
+            }
+        }
+
+        //__________________________________
+        // - update Boundary conditions
+        //   Don't set Lodi bcs, we already compute Press
+        //   in all the extra cells.
+        // - make copy of press for implicit calc.
+        customBC_localVars* BC_localVars = scinew customBC_localVars();
+        preprocess_CustomBCs("EqPress", old_dw, new_dw, Ilb, patch, 999,
+            d_ice->d_BC_globalVars, BC_localVars);
+
+        setBC(press_new, rho_micro, placeHolder, d_ice->d_surroundingMatl_indx,
+            "rho_micro", "Pressure", patch, m_materialManager, 0, new_dw,
+            d_ice->d_BC_globalVars, BC_localVars, isNotInitialTimeStep);
+
+        delete_CustomBCs(d_ice->d_BC_globalVars, BC_localVars);
+
+
+        //__________________________________
+        // compute sp_vol_CC
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+                const IntVector& c = *iter;
+                sp_vol_new[m][c] = 1.0 / rho_micro[m][c];
+            }
+
+            Material* matl = m_materialManager->getMaterial(m);
+            int indx = matl->getDWIndex();
+            setSpecificVolBC(sp_vol_new[m], "SpecificVol", false, rho_CC_new[m], vol_frac[m],
+                patch, m_materialManager, indx);
+        }
+        //__________________________________
+        //  compute f_theta  
+        for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+            const IntVector& c = *iter;
+            sumKappa[c] = 0.0;
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                kappa[m][c] = sp_vol_new[m][c] / (speedSound[m][c] * speedSound[m][c]);
+                sumKappa[c] += vol_frac[m][c] * kappa[m][c];
+            }
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                f_theta[m][c] = vol_frac[m][c] * kappa[m][c] / sumKappa[c];
+            }
+        }
+
+        //____ BB : B U L L E T   P R O O F I N G----
+        //for (unsigned int m = 0; m < numALLMatls; m++) {
+        //  Material* matl = m_materialManager->getMaterial( m );
+        //  int indx = matl->getDWIndex();
+        //  for(CellIterator iter = patch->getCellIterator(); !iter.done(); iter++){
+        //    if (isnan(kappa[m][*iter]) || isinf(kappa[m][*iter])) {
+        //      ostringstream warn;
+        //      warn<<"MPMICE:(L-"<<m<<"):computeEquilibrationPressure, mat "<<indx<<" cell "
+        //             << *iter << " kappa = " << kappa[m][*iter] 
+        //             << " vol_frac = " << vol_frac[m][*iter] 
+        //             << " sp_vol_new = " << sp_vol_new[m][*iter] 
+        //             << " speedSound = " << speedSound[m][*iter] << endl;
+        //      throw InvalidValue(warn.str(), __FILE__, __LINE__);
+        //    }
+        //  }
+        //}
+
+#if 0
+    //__________________________________
+    //  compute f_theta  (alternate)
+        for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+            const IntVector& c = *iter;
+            sumKappa[c] = 0.0;
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                if (ice_matl[m]) {
+                    kappa[m][c] = sp_vol_new[m][c] / (speedSound[m][c] * speedSound[m][c]);
+                }
+                if (mpm_matl[m]) {
+                    kappa[m][c] = mpm_matl[m]->getConstitutiveModel()->getCompressibility();
+                }
+                sumKappa[c] += vol_frac[m][c] * kappa[m][c];
+            }
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                f_theta[m][c] = vol_frac[m][c] * kappa[m][c] / sumKappa[c];
+            }
+        }
+#endif
+
+    }  //patches
+}
+
+/* ---------------------------------------------------------------------
+ Function~  MPMICE::binaryPressureSearch--
+ Purpose:   When the technique for find the equilibration pressure
+            craps out then try this method.
+ Reference:  Se Numerical Methods by Robert W. Hornbeck.
+_____________________________________________________________________*/
+void MPMICE::binaryPressureSearch(std::vector<constCCVariable<double> >& Temp,
+    std::vector<CCVariable<double> >& rho_micro,
+    std::vector<CCVariable<double> >& vol_frac,
+    std::vector<CCVariable<double> >& rho_CC_new,
+    std::vector<CCVariable<double> >& speedSound,
+    std::vector<double>& dp_drho,
+    std::vector<double>& dp_de,
+    std::vector<double>& press_eos,
+    constCCVariable<double>& press,
+    CCVariable<double>& press_new,
+    double press_ref,
+    std::vector<constCCVariable<double> >& cv,
+    std::vector<constCCVariable<double> >& gamma,
+    double convergence_crit,
+    unsigned int numALLMatls,
+    int& count,
+    double& sum,
+    IntVector c)
+{
+    // Start over for this cell using a binary search
+  //  cout << " cell " << c << " Starting binary pressure search "<< endl;
+    count = 0;
+    bool converged = false;
+    double c_2;
+    double Pleft = 0., Pright = 0., Ptemp = 0., Pm = 0.;
+    double rhoMicroR = 0., rhoMicroL = 0.;
+    std::vector<double> vfR(numALLMatls);
+    std::vector<double> vfL(numALLMatls);
+    Pm = press[c];
+    double residual = 1.0;
+
+    while (count < d_ice->d_max_iter_equilibration && converged == false) {
+        count++;
+        sum = 0.;
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            Material* matl = m_materialManager->getMaterial(m);
+            ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
+            MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
+            if (ice_matl) {        // ICE
+                rho_micro[m][c] =
+                    ice_matl->getEOS()->computeRhoMicro(Pm, gamma[m][c],
+                        cv[m][c], Temp[m][c], rho_micro[m][c]);
+            }
+            if (mpm_matl) {        // MPM
+                rho_micro[m][c] =
+                    mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
+                        Pm, press_ref, mpm_matl, Temp[m][c], rho_micro[m][c]);
+            }
+            vol_frac[m][c] = rho_CC_new[m][c] / rho_micro[m][c];
+            sum += vol_frac[m][c];
+        }  // loop over matls
+
+        residual = 1. - sum;
+
+        if (fabs(residual) <= convergence_crit) {
+            converged = true;
+            press_new[c] = Pm;
+            //__________________________________
+            // Find the speed of sound at ijk
+            // needed by eos and the the explicit
+            // del pressure function
+            //feclearexcept(FE_ALL_EXCEPT);
+            for (unsigned int m = 0; m < numALLMatls; m++) {
+                Material* matl = m_materialManager->getMaterial(m);
+                ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
+                MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
+                if (ice_matl) {       // ICE
+                    ice_matl->getEOS()->computePressEOS(rho_micro[m][c], gamma[m][c],
+                        cv[m][c], Temp[m][c], press_eos[m],
+                        dp_drho[m], dp_de[m]);
+                    c_2 = dp_drho[m] + dp_de[m] *
+                        (press_eos[m] / (rho_micro[m][c] * rho_micro[m][c]));
+                }
+                if (mpm_matl) {       // MPM
+                    mpm_matl->getConstitutiveModel()->
+                        computePressEOSCM(rho_micro[m][c], press_eos[m], press_ref,
+                            dp_drho[m], c_2, mpm_matl, Temp[m][c]);
+                }
+                speedSound[m][c] = sqrt(c_2);     // Isentropic speed of sound
+
+                //____ BB : B U L L E T   P R O O F I N G----
+                // catch inf and nan speed sound values
+                //if (fetestexcept(FE_INVALID) != 0 || c_2 == 0.0) {
+                //  ostringstream warn;
+                //  warn<<"ERROR MPMICE::binaryPressSearch, mat= "<< m << " cell= "
+                //      << c << " sound speed is imaginary.\n";
+                //  warn << "speedSound = " << speedSound[m][c] << " c_2 = " << c_2 
+                //       << " press_eos = " << press_eos[m]
+                //       << " dp_drho = " << dp_drho[m]
+                //       << " dp_de = " << dp_de[m]
+                //       << " rho_micro = " << rho_micro[m][c] << " Temp = " << Temp[m][c] << endl;
+                //  throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
+                //}
+            }
+        }
+        // Initial guess
+        if (count == 1) {
+            Pleft = DBL_EPSILON;
+            Pright = 1.0 / DBL_EPSILON;
+            Ptemp = .5 * (Pleft + Pright);
+        }
+
+        double sumR = 0., sumL = 0.;
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            Material* matl = m_materialManager->getMaterial(m);
+            ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
+            MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
+
+            if (ice_matl) {        //  ICE
+                rhoMicroR = ice_matl->getEOS()->
+                    computeRhoMicro(Pright, gamma[m][c], cv[m][c], Temp[m][c], rho_micro[m][c]);
+                rhoMicroL = ice_matl->getEOS()->
+                    computeRhoMicro(Pleft, gamma[m][c], cv[m][c], Temp[m][c], rho_micro[m][c]);
+            }
+            if (mpm_matl) {        //  MPM
+                rhoMicroR =
+                    mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
+                        Pright, press_ref, mpm_matl, Temp[m][c], rho_micro[m][c]);
+                rhoMicroL =
+                    mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
+                        Pleft, press_ref, mpm_matl, Temp[m][c], rho_micro[m][c]);
+            }
+            vfR[m] = rho_CC_new[m][c] / rhoMicroR;
+            vfL[m] = rho_CC_new[m][c] / rhoMicroL;
+            sumR += vfR[m];
+            sumL += vfL[m];
+
+            //      cout << "matl: " << m << " vol_frac_L: " << vfL[m] << " vol_frac_R: " << vfR[m] 
+            //           << " rho_CC: " << rho_CC_new[m][c] << " rho_micro_L: " << rhoMicroL << " rhoMicroR: " << rhoMicroR << endl;
+        }  // all matls
+
+
+    //    cout << "Pm = " << Pm << "\t P_L: " << Pleft << "\t P_R: " << Pright << "\t 1.-sum " << residual << " \t sumR: " << sumR << " \t sumL " << sumL << endl;
+
+        //__________________________________
+        //  come up with a new guess
+        double prod = (1. - sumR) * (1. - sumL);
+        if (prod < 0.) {
+            Ptemp = Pleft;
+            Pleft = .5 * (Pleft + Pright);
+        }
+        else {
+            Pright = Pleft;
+            Pleft = Ptemp;
+            Pleft = 0.5 * (Pleft + Pright);
+        }
+        Pm = .5 * (Pleft + Pright);
+        //   cout << setprecision(15);
+
+    }   // end of converged
+
+#ifdef D_STRICT
+    if (count >= d_ice->d_max_iter_equilibration) {
+        ostringstream desc;
+        desc << "**ERROR** Binary pressure search failed to converge in cell" << c << endl;
+        throw ConvergenceFailure(desc.str(), d_ice->d_max_iter_equilibration,
+            fabs(residual), convergence_crit, __FILE__, __LINE__);
+    }
+#else
+    if (count >= d_ice->d_max_iter_equilibration) {
+        cout << "**WARNING** Binary pressure search failed to converge in cell " << c << " after "
+            << d_ice->d_max_iter_equilibration << " iterations.  Final residual is "
+            << fabs(residual) << " and convergence tolerance is " << convergence_crit << endl;
+        cout << "  Continuing with unconverged value of pressure = " << Pm << endl;
+        press_new[c] = Pm;
+        //__________________________________
+        // Find the speed of sound at ijk
+        // needed by eos and the the explicit
+        // del pressure function
+        for (unsigned int m = 0; m < numALLMatls; m++) {
+            Material* matl = m_materialManager->getMaterial(m);
+            ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
+            MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
+            if (ice_matl) {       // ICE
+                ice_matl->getEOS()->computePressEOS(rho_micro[m][c], gamma[m][c],
+                    cv[m][c], Temp[m][c], press_eos[m],
+                    dp_drho[m], dp_de[m]);
+                c_2 = dp_drho[m] + dp_de[m] *
+                    (press_eos[m] / (rho_micro[m][c] * rho_micro[m][c]));
+            }
+            if (mpm_matl) {       // MPM
+                mpm_matl->getConstitutiveModel()->
+                    computePressEOSCM(rho_micro[m][c], press_eos[m], press_ref,
+                        dp_drho[m], c_2, mpm_matl, Temp[m][c]);
+            }
+            speedSound[m][c] = sqrt(c_2);     // Isentropic speed of sound
+            cout << "    Material " << m << " vol. frac = " << vol_frac[m][c]
+                << " rho = " << rho_micro[m][c] << " press = " << press_eos[m]
+                << " dp_drho = " << dp_drho[m] << " c^2 = " << c_2 << endl;
+        }
+    }
+#endif
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleInterpolatePressCCToPressNC(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSubset* press_matl,
+    const MaterialSet* matls)
+{
+    const Level* level = getLevel(patches);
+    int L_indx = level->getIndex();
+    if (!d_mpm->flags->doMPMOnLevel(L_indx, level->getGrid()->numLevels()))
+        return;
+
+    printSchedule(patches, cout_doing, "MPMICE::scheduleInterpolatePressCCToPressNC");
+
+    Task* t = scinew Task("MPMICE::interpolatePressCCToPressNC",
+        this, &MPMICE::interpolatePressCCToPressNC);
+
+    Ghost::GhostType  gac = Ghost::AroundCells;
+    t->requires(Task::NewDW, Ilb->press_CCLabel, press_matl, gac, 1);
+    t->computes(MIlb->press_NCLabel, press_matl);
+
+    sched->addTask(t, patches, matls);
+}
+
+//______________________________________________________________________
+//
+void MPMICE::interpolatePressCCToPressNC(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse*,
+    DataWarehouse* new_dw)
+{
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing interpolatePressCCToPressNC");
+
+        constCCVariable<double> pressCC;
+        NCVariable<double> pressNC;
+
+        Ghost::GhostType  gac = Ghost::AroundCells;
+        new_dw->get(pressCC, Ilb->press_CCLabel, 0, patch, gac, 1);
+        new_dw->allocateAndPut(pressNC, MIlb->press_NCLabel, 0, patch);
+        pressNC.initialize(0.0);
+
+        IntVector cIdx[8];
+        // Interpolate CC pressure to nodes
+        for (NodeIterator iter = patch->getNodeIterator(); !iter.done(); iter++) {
+            patch->findCellsFromNode(*iter, cIdx);
+            for (int in = 0; in < 8; in++) {
+                pressNC[*iter] += .125 * pressCC[cIdx[in]];
+            }
+        }
+
+        // Apply grid boundary conditions to the pressure before storing the data
+        string inter_type = d_mpm->flags->d_interpolator_type;
+        MPMBoundCond bc;
+        bc.setBoundaryCondition(patch, 0, "Pressure", pressNC, inter_type);
+    }
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleInterpolatePAndGradP(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSubset* press_matl,
+    const MaterialSubset* /*one_matl*/,
+    const MaterialSubset* mpm_matl,
+    const MaterialSet* all_matls)
+{
+    if (!d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
+        getLevel(patches)->getGrid()->numLevels()))
+        return;
+
+    printSchedule(patches, cout_doing, "MPMICE::scheduleInterpolatePAndGradP");
+
+    Task* t = scinew Task("MPMICE::interpolatePAndGradP",
+        this, &MPMICE::interpolatePAndGradP);
+    Ghost::GhostType  gac = Ghost::AroundCells;
+
+    t->requires(Task::NewDW, MIlb->press_NCLabel, press_matl, gac, NGN);
+    t->requires(Task::NewDW, MIlb->cMassLabel, mpm_matl, gac, 1);
+    t->requires(Task::OldDW, Mlb->pXLabel, mpm_matl, Ghost::None);
+    t->requires(Task::NewDW, Mlb->pCurSizeLabel, mpm_matl, Ghost::None);
+
+    t->computes(Mlb->pPressureLabel, mpm_matl);
+    sched->addTask(t, patches, all_matls);
+}
+
+//______________________________________________________________________
+//
+void MPMICE::interpolatePAndGradP(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw)
+{
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing interpolatePressureToParticles");
+
+        ParticleInterpolator* interpolator = d_mpm->flags->d_interpolator->clone(patch);
+        vector<IntVector> ni(interpolator->size());
+        vector<double> S(interpolator->size());
+
+        double p_ref = d_ice->getRefPress();
+        constNCVariable<double>   pressNC;
+        Ghost::GhostType  gac = Ghost::AroundCells;
+        new_dw->get(pressNC, MIlb->press_NCLabel, 0, patch, gac, NGN);
+
+        for (unsigned int m = 0; m < m_materialManager->getNumMatls("MPM"); m++) {
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+
+            ParticleSubset* pset = old_dw->getParticleSubset(indx, patch);
+            ParticleVariable<double> pPressure;
+            constParticleVariable<Point> px;
+            constParticleVariable<Matrix3> psize;
+            constParticleVariable<Matrix3> deformationGradient;
+            new_dw->get(psize, Mlb->pCurSizeLabel, pset);
+            old_dw->get(px, Mlb->pXLabel, pset);
+            new_dw->allocateAndPut(pPressure, Mlb->pPressureLabel, pset);
+
+            //__________________________________
+            // Interpolate NC pressure to particles
+            for (ParticleSubset::iterator iter = pset->begin();
+                iter != pset->end(); iter++) {
+                particleIndex idx = *iter;
+                double press = 0.;
+
+                // Get the node indices that surround the cell
+                int NN = interpolator->findCellAndWeights(px[idx], ni, S, psize[idx]);
+
+                for (int k = 0; k < NN; k++) {
+                    press += pressNC[ni[k]] * S[k];
+                }
+                pPressure[idx] = press - p_ref;
+            }
+        }  // numMPMMatls
+        delete interpolator;
+    } //patches
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleComputeLagrangianValuesMPM(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSubset* one_matl,
+    const MaterialSet* mpm_matls)
+{
+    if (d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
+        getLevel(patches)->getGrid()->numLevels())) {
+
+        printSchedule(patches, cout_doing, "MPMICE::scheduleComputeLagrangianValuesMPM");
+
+        Task* t = scinew Task("MPMICE::computeLagrangianValuesMPM",
+            this, &MPMICE::computeLagrangianValuesMPM);
+
+        const MaterialSubset* mss = mpm_matls->getUnion();
+        Ghost::GhostType  gac = Ghost::AroundCells;
+        Ghost::GhostType  gn = Ghost::None;
+        t->requires(Task::NewDW, Mlb->gVelocityStarLabel, mss, gac, 1);
+        t->requires(Task::NewDW, Mlb->gMassLabel, gac, 1);
+        t->requires(Task::NewDW, Mlb->gTemperatureStarLabel, gac, 1);
+        t->requires(Task::OldDW, Mlb->NC_CCweightLabel, one_matl, gac, 1);
+        t->requires(Task::NewDW, MIlb->cMassLabel, gn);
+        t->requires(Task::NewDW, Ilb->int_eng_source_CCLabel, gn);
+        t->requires(Task::NewDW, Ilb->mom_source_CCLabel, gn);
+
+        t->requires(Task::NewDW, MIlb->temp_CCLabel, gn);
+        t->requires(Task::NewDW, MIlb->vel_CCLabel, gn);
+
+        t->requires(Task::OldDW, Ilb->timeStepLabel);
+
+        if (d_ice->d_models.size() > 0 && !do_mlmpmice) {
+            t->requires(Task::NewDW, Ilb->modelMass_srcLabel, gn);
+            t->requires(Task::NewDW, Ilb->modelMom_srcLabel, gn);
+            t->requires(Task::NewDW, Ilb->modelEng_srcLabel, gn);
+        }
+
+        t->computes(Ilb->mass_L_CCLabel);
+        t->computes(Ilb->mom_L_CCLabel);
+        t->computes(Ilb->int_eng_L_CCLabel);
+
+        sched->addTask(t, patches, mpm_matls);
+    }
+}
+
+//______________________________________________________________________
+//
+void MPMICE::computeLagrangianValuesMPM(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw)
+{
+    timeStep_vartype timeStep;
+    old_dw->get(timeStep, VarLabel::find(timeStep_name));
+
+    bool isNotInitialTimeStep = (timeStep > 0);
+
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing computeLagrangianValuesMPM");
+
+        unsigned int numMatls = m_materialManager->getNumMatls("MPM");
+        Vector dx = patch->dCell();
+        double cellVol = dx.x() * dx.y() * dx.z();
+        double very_small_mass = d_TINY_RHO * cellVol;
+        Ghost::GhostType  gn = Ghost::None;
+        Ghost::GhostType  gac = Ghost::AroundCells;
+
+        constNCVariable<double> NC_CCweight;
+        old_dw->get(NC_CCweight, Mlb->NC_CCweightLabel, 0, patch, gac, 1);
+        for (unsigned int m = 0; m < numMatls; m++) {
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+
+            // Create arrays for the grid data
+            constNCVariable<double> gmass, gvolume, gtempstar;
+            constNCVariable<Vector> gvelocity;
+            CCVariable<Vector> cmomentum;
+            CCVariable<double> int_eng_L, mass_L;
+            constCCVariable<double> cmass, Temp_CC_sur, int_eng_src;
+            constCCVariable<Vector> vel_CC_sur, mom_source;
+            new_dw->get(gmass, Mlb->gMassLabel, indx, patch, gac, 1);
+            new_dw->get(gvelocity, Mlb->gVelocityStarLabel, indx, patch, gac, 1);
+            new_dw->get(gtempstar, Mlb->gTemperatureStarLabel, indx, patch, gac, 1);
+            new_dw->get(cmass, MIlb->cMassLabel, indx, patch, gn, 0);
+            new_dw->get(Temp_CC_sur, MIlb->temp_CCLabel, indx, patch, gn, 0);
+            new_dw->get(vel_CC_sur, MIlb->vel_CCLabel, indx, patch, gn, 0);
+            new_dw->get(mom_source, Ilb->mom_source_CCLabel, indx, patch, gn, 0);
+            new_dw->get(int_eng_src, Ilb->int_eng_source_CCLabel, indx, patch, gn, 0);
+
+            new_dw->allocateAndPut(mass_L, Ilb->mass_L_CCLabel, indx, patch);
+            new_dw->allocateAndPut(cmomentum, Ilb->mom_L_CCLabel, indx, patch);
+            new_dw->allocateAndPut(int_eng_L, Ilb->int_eng_L_CCLabel, indx, patch);
+
+            cmomentum.initialize(Vector(0.0, 0.0, 0.0));
+            int_eng_L.initialize(0.);
+            mass_L.initialize(0.);
+            double cv = mpm_matl->getSpecificHeat();
+
+            IntVector nodeIdx[8];
+
+            for (CellIterator iter = patch->getExtraCellIterator(); !iter.done();
+                iter++) {
+                IntVector c = *iter;
+                patch->findNodesFromCell(c, nodeIdx);
+                double int_eng_L_mpm = 0.0;
+                double int_eng_L_sur = cmass[c] * Temp_CC_sur[c] * cv;
+                Vector cmomentum_mpm = Vector(0.0, 0.0, 0.0);
+                Vector cmomentum_sur = vel_CC_sur[c] * cmass[c];
+
+                for (int in = 0; in < 8; in++) {
+                    double NC_CCw_mass = NC_CCweight[nodeIdx[in]] * gmass[nodeIdx[in]];
+                    cmomentum_mpm += gvelocity[nodeIdx[in]] * NC_CCw_mass;
+                    int_eng_L_mpm += gtempstar[nodeIdx[in]] * cv * NC_CCw_mass;
+                }
+                int_eng_L_mpm += int_eng_src[c];
+                if (!d_rigidMPM) {
+                    cmomentum_mpm += mom_source[c];
+                }
+                //__________________________________
+                // set cmomentum/int_eng_L to either 
+                // what's calculated from mpm or 
+                // the surrounding value.
+                // If you change this you must also change MPMICE::interpolateNCToCC_0  
+                double one_or_zero = (cmass[c] - very_small_mass) / cmass[c];
+                cmomentum[c] = (1.0 - one_or_zero) * cmomentum_sur +
+                    one_or_zero * cmomentum_mpm;
+                int_eng_L[c] = (1.0 - one_or_zero) * int_eng_L_sur +
+                    one_or_zero * int_eng_L_mpm;
+            }
+            //__________________________________
+            //  NO REACTION
+            if (d_ice->d_models.size() == 0 || do_mlmpmice) {
+                for (CellIterator iter = patch->getExtraCellIterator(); !iter.done();
+                    iter++) {
+                    IntVector c = *iter;
+                    mass_L[c] = cmass[c];
+                }
+            }
+            //__________________________________
+            //   M O D E L   B A S E D   E X C H A N G E
+            // The reaction can't completely eliminate 
+            //  all the mass, momentum and internal E.
+            // If it does then we'll get erroneous vel,
+            // and temps in CCMomExchange.  If the mass
+            // goes to min_mass then cmomentum and int_eng_L
+            // need to be scaled by min_mass to avoid inf temp and vel_CC
+            // in 
+            if (d_ice->d_models.size() > 0 && !do_mlmpmice) {
+                constCCVariable<double> modelMass_src;
+                constCCVariable<double> modelEng_src;
+                constCCVariable<Vector> modelMom_src;
+                new_dw->get(modelMass_src, Ilb->modelMass_srcLabel, indx, patch, gn, 0);
+                new_dw->get(modelMom_src, Ilb->modelMom_srcLabel, indx, patch, gn, 0);
+                new_dw->get(modelEng_src, Ilb->modelEng_srcLabel, indx, patch, gn, 0);
+
+                for (CellIterator iter = patch->getExtraCellIterator(); !iter.done();
+                    iter++) {
+                    IntVector c = *iter;
+                    //  must have a minimum mass
+                    double min_mass = very_small_mass;
+                    double inv_cmass = 1.0 / cmass[c];
+                    mass_L[c] = std::max((cmass[c] + modelMass_src[c]), min_mass);
+
+                    //  must have a minimum momentum 
+                    for (int dir = 0; dir < 3; dir++) {  //loop over all three directons
+                        double min_mom_L = min_mass * cmomentum[c][dir] * inv_cmass;
+                        double mom_L_tmp = cmomentum[c][dir] + modelMom_src[c][dir];
+
+                        // Preserve the original sign on momemtum     
+                        // Use d_SMALL_NUMs to avoid nans when mom_L_temp = 0.0
+                        double plus_minus_one = (mom_L_tmp + d_SMALL_NUM) /
+                            (fabs(mom_L_tmp + d_SMALL_NUM));
+
+                        mom_L_tmp = (mom_L_tmp / mass_L[c]) * (cmass[c] + modelMass_src[c]);
+
+                        cmomentum[c][dir] = plus_minus_one *
+                            std::max(fabs(mom_L_tmp), fabs(min_mom_L));
+                    }
+                    // must have a minimum int_eng   
+                    double min_int_eng = min_mass * int_eng_L[c] * inv_cmass;
+                    int_eng_L[c] = (int_eng_L[c] / mass_L[c]) * (cmass[c] + modelMass_src[c]);
+                    int_eng_L[c] = std::max((int_eng_L[c] + modelEng_src[c]), min_int_eng);
+                }
+            }  // if(model.size() >0)      
+
+             //__________________________________
+             //  Set Boundary conditions
+            setBC(cmomentum, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(int_eng_L, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+
+            //---- B U L L E T   P R O O F I N G------
+            // ignore BP if recompute time step has already been requested
+            IntVector neg_cell;
+            ostringstream warn;
+            bool rts = new_dw->recomputeTimeStep();
+
+            if (d_testForNegTemps_mpm) {
+                if (!areAllValuesPositive(int_eng_L, neg_cell) && !rts) {
+                    int L = getLevel(patches)->getIndex();
+                    warn << "ERROR MPMICE:(" << L << "):computeLagrangianValuesMPM, mat "
+                        << indx << " cell "
+                        << neg_cell << " int_eng_L_CC " << int_eng_L[neg_cell] << "\n ";
+                    throw InvalidValue(warn.str(), __FILE__, __LINE__);
+                }
+            }
+        }  //numMatls
+    }  //patches
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleComputeCCVelAndTempRates(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSet* mpm_matls)
+{
+    printSchedule(patches, cout_doing, "MPMICE::scheduleComputeCCVelAndTempRates");
+
+    Task* t = scinew Task("MPMICE::computeCCVelAndTempRates",
+        this, &MPMICE::computeCCVelAndTempRates);
+
+    Ghost::GhostType  gn = Ghost::None;
+
+    t->requires(Task::OldDW, Ilb->timeStepLabel);
+    t->requires(Task::OldDW, Ilb->delTLabel, getLevel(patches));
+    t->requires(Task::NewDW, Ilb->mass_L_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->mom_L_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->int_eng_L_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->mom_L_ME_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->eng_L_ME_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->int_eng_source_CCLabel, gn);
+    t->requires(Task::NewDW, Ilb->mom_source_CCLabel, gn);
+    t->requires(Task::OldDW, Mlb->heatRate_CCLabel, gn);
+
+    t->computes(Ilb->dTdt_CCLabel);
+    t->computes(Ilb->dVdt_CCLabel);
+    t->computes(Mlb->heatRate_CCLabel);
+
+    sched->addTask(t, patches, mpm_matls);
+}
+
+//______________________________________________________________________
+//
+void MPMICE::computeCCVelAndTempRates(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw)
+{
+    timeStep_vartype timeStep;
+    old_dw->get(timeStep, VarLabel::find(timeStep_name));
+
+    bool isNotInitialTimeStep = (timeStep > 0);
+
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing computeCCVelAndTempRates");
+
+        //__________________________________
+        // This is where I interpolate the CC 
+        // changes to NCs for the MPMMatls
+        unsigned int numMPMMatls = m_materialManager->getNumMatls("MPM");
+
+        delt_vartype delT;
+        old_dw->get(delT, Ilb->delTLabel);
+
+        for (unsigned int m = 0; m < numMPMMatls; m++) {
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+            CCVariable<double> dTdt_CC, heatRate;
+            CCVariable<Vector> dVdt_CC;
+
+            constCCVariable<double> mass_L_CC, old_heatRate;
+            constCCVariable<Vector> mom_L_ME_CC, old_mom_L_CC, mom_source;
+            constCCVariable<double> eng_L_ME_CC, old_int_eng_L_CC, int_eng_src;
+
+            double cv = mpm_matl->getSpecificHeat();
+
+            Ghost::GhostType  gn = Ghost::None;
+            new_dw->get(old_mom_L_CC, Ilb->mom_L_CCLabel, indx, patch, gn, 0);
+            new_dw->get(old_int_eng_L_CC, Ilb->int_eng_L_CCLabel, indx, patch, gn, 0);
+            new_dw->get(mass_L_CC, Ilb->mass_L_CCLabel, indx, patch, gn, 0);
+            new_dw->get(mom_L_ME_CC, Ilb->mom_L_ME_CCLabel, indx, patch, gn, 0);
+            new_dw->get(eng_L_ME_CC, Ilb->eng_L_ME_CCLabel, indx, patch, gn, 0);
+            old_dw->get(old_heatRate, Mlb->heatRate_CCLabel, indx, patch, gn, 0);
+            new_dw->get(mom_source, Ilb->mom_source_CCLabel, indx, patch, gn, 0);
+            new_dw->get(int_eng_src, Ilb->int_eng_source_CCLabel, indx, patch, gn, 0);
+
+            new_dw->allocateAndPut(dTdt_CC, Ilb->dTdt_CCLabel, indx, patch);
+            new_dw->allocateAndPut(dVdt_CC, Ilb->dVdt_CCLabel, indx, patch);
+            new_dw->allocateAndPut(heatRate, Mlb->heatRate_CCLabel, indx, patch);
+
+            dTdt_CC.initialize(0.0);
+            dVdt_CC.initialize(Vector(0.0));
+            //__________________________________
+            for (CellIterator iter = patch->getExtraCellIterator(); !iter.done(); iter++) {
+                IntVector c = *iter;
+                if (!d_rigidMPM) {
+                    dVdt_CC[c] = (mom_L_ME_CC[c] - (old_mom_L_CC[c] - mom_source[c]))
+                        / (mass_L_CC[c] * delT);
+                }
+                dTdt_CC[c] = (eng_L_ME_CC[c] - (old_int_eng_L_CC[c] - int_eng_src[c]))
+                    / (mass_L_CC[c] * cv * delT);
+                double heatRte = (eng_L_ME_CC[c] - old_int_eng_L_CC[c]) / delT;
+                heatRate[c] = .05 * heatRte + .95 * old_heatRate[c];
+            }
+            setBC(dTdt_CC, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+            setBC(dVdt_CC, "set_if_sym_BC", patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
+        }
+    }  //patches
+}
+
+//______________________________________________________________________
+//
+void MPMICE::scheduleInterpolateCCToNC(SchedulerP& sched,
+    const PatchSet* patches,
+    const MaterialSet* mpm_matls)
+{
+    if (!d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
+        getLevel(patches)->getGrid()->numLevels()))
+        return;
+
+    printSchedule(patches, cout_doing, "MPMICE::scheduleInterpolateCCToNC");
+
+    Task* t = scinew Task("MPMICE::interpolateCCToNC",
+        this, &MPMICE::interpolateCCToNC);
+    const MaterialSubset* mss = mpm_matls->getUnion();
+    Ghost::GhostType  gan = Ghost::AroundNodes;
+    Ghost::GhostType  gac = Ghost::AroundCells;
+
+    t->requires(Task::OldDW, Ilb->delTLabel, getLevel(patches));
+    t->requires(Task::NewDW, Ilb->dVdt_CCLabel, gan, 1);
+    t->requires(Task::NewDW, Ilb->dTdt_CCLabel, gan, 1);
+
+    if (d_ice->d_models.size() > 0) {
+        t->requires(Task::NewDW, MIlb->cMassLabel, gac, 1);
+        t->requires(Task::NewDW, Ilb->modelMass_srcLabel, gac, 1);
+    }
+
+    t->modifies(Mlb->gVelocityStarLabel, mss);
+    t->modifies(Mlb->gAccelerationLabel, mss);
+    t->computes(Mlb->massBurnFractionLabel, mss);
+    t->computes(Mlb->dTdt_NCLabel);
+
+    sched->addTask(t, patches, mpm_matls);
+}
+
+//______________________________________________________________________
+//
+void MPMICE::interpolateCCToNC(const ProcessorGroup*,
+    const PatchSubset* patches,
+    const MaterialSubset*,
+    DataWarehouse* old_dw,
+    DataWarehouse* new_dw)
+{
+    for (int p = 0; p < patches->size(); p++) {
+        const Patch* patch = patches->get(p);
+        printTask(patches, patch, cout_doing, "Doing interpolateCCToNC");
+
+        //__________________________________
+        // This is where I interpolate the CC 
+        // changes to NCs for the MPMMatls
+        unsigned int numMPMMatls = m_materialManager->getNumMatls("MPM");
+
+        delt_vartype delT;
+        old_dw->get(delT, Ilb->delTLabel);
+
+        for (unsigned int m = 0; m < numMPMMatls; m++) {
+            MPMMaterial* mpm_matl = (MPMMaterial*)m_materialManager->getMaterial("MPM", m);
+            int indx = mpm_matl->getDWIndex();
+            NCVariable<Vector> gacceleration, gvelocity;
+            NCVariable<double> dTdt_NC, massBurnFraction;
+
+            constCCVariable<double> dTdt_CC;
+            constCCVariable<Vector> dVdt_CC;
+
+            new_dw->getModifiable(gvelocity, Mlb->gVelocityStarLabel, indx, patch);
+            new_dw->getModifiable(gacceleration, Mlb->gAccelerationLabel, indx, patch);
+
+            Ghost::GhostType  gan = Ghost::AroundNodes;
+            new_dw->get(dTdt_CC, Ilb->dTdt_CCLabel, indx, patch, gan, 1);
+            new_dw->get(dVdt_CC, Ilb->dVdt_CCLabel, indx, patch, gan, 1);
+
+            new_dw->allocateAndPut(massBurnFraction,
+                Mlb->massBurnFractionLabel, indx, patch);
+            new_dw->allocateAndPut(dTdt_NC, Mlb->dTdt_NCLabel, indx, patch);
+
+            dTdt_NC.initialize(0.0);
+            massBurnFraction.initialize(0.);
+            IntVector cIdx[8];
+            //__________________________________
+            //  
+            for (NodeIterator iter = patch->getNodeIterator(); !iter.done(); iter++) {
+                patch->findCellsFromNode(*iter, cIdx);
+                for (int in = 0; in < 8; in++) {
+                    gvelocity[*iter] += dVdt_CC[cIdx[in]] * delT * .125;
+                    gacceleration[*iter] += dVdt_CC[cIdx[in]] * .125;
+                    dTdt_NC[*iter] += dTdt_CC[cIdx[in]] * .125;
+                }
+            }
+            //__________________________________
+            //  inter-material phase transformation
+            if (d_ice->d_models.size() > 0) {
+                constCCVariable<double> modelMass_src, mass_CC;
+                Ghost::GhostType  gac = Ghost::AroundCells;
+                new_dw->get(modelMass_src, Ilb->modelMass_srcLabel, indx, patch, gac, 1);
+                new_dw->get(mass_CC, MIlb->cMassLabel, indx, patch, gac, 1);
+
+                for (NodeIterator iter = patch->getNodeIterator(); !iter.done(); iter++) {
+                    patch->findCellsFromNode(*iter, cIdx);
+                    for (int in = 0; in < 8; in++) {
+                        massBurnFraction[*iter] +=
+                            (fabs(modelMass_src[cIdx[in]]) / mass_CC[cIdx[in]]) * .125;
+
+                    }
+                }
+            }  // if(models >0 )
+        }  // mpmMatls
+    }  //patches
+}
+
+
+// Optional function //
 //______________________________________________________________________
 //
 void MPMICE::scheduleRefinePressCC(SchedulerP& sched,
@@ -704,183 +2331,7 @@ void MPMICE::scheduleRefinePressCC(SchedulerP& sched,
     delete press_matls;
 }
 
-//______________________________________________________________________
-//
-void MPMICE::scheduleInterpolatePressCCToPressNC(SchedulerP& sched,
-                                           const PatchSet* patches,
-                                           const MaterialSubset* press_matl,
-                                           const MaterialSet* matls)
-{
-  const Level* level = getLevel(patches);
-  int L_indx = level->getIndex();
-  if(!d_mpm->flags->doMPMOnLevel(L_indx,level->getGrid()->numLevels()))
-    return;
-    
-  printSchedule(patches,cout_doing, "MPMICE::scheduleInterpolatePressCCToPressNC"); 
-    
-  Task* t=scinew Task("MPMICE::interpolatePressCCToPressNC",
-                    this, &MPMICE::interpolatePressCCToPressNC);
-
-  Ghost::GhostType  gac = Ghost::AroundCells;
-  t->requires(Task::NewDW,Ilb->press_CCLabel, press_matl, gac, 1);
-  t->computes(MIlb->press_NCLabel, press_matl);
-  
-  sched->addTask(t, patches, matls);
-}
-
-//______________________________________________________________________
-//
-void MPMICE::scheduleInterpolatePAndGradP(SchedulerP& sched,
-                                     const PatchSet* patches,
-                                     const MaterialSubset* press_matl,
-                                     const MaterialSubset* /*one_matl*/,
-                                     const MaterialSubset* mpm_matl,
-                                     const MaterialSet* all_matls)
-{
-  if(!d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
-                                 getLevel(patches)->getGrid()->numLevels()))
-    return;
-
-  printSchedule(patches,cout_doing,"MPMICE::scheduleInterpolatePAndGradP");
- 
-  Task* t=scinew Task("MPMICE::interpolatePAndGradP",
-                      this, &MPMICE::interpolatePAndGradP);
-  Ghost::GhostType  gac = Ghost::AroundCells;
-  
-  t->requires(Task::NewDW, MIlb->press_NCLabel,       press_matl,gac, NGN);
-  t->requires(Task::NewDW, MIlb->cMassLabel,          mpm_matl,  gac, 1);
-  t->requires(Task::OldDW, Mlb->pXLabel,              mpm_matl,  Ghost::None);
-  t->requires(Task::NewDW, Mlb->pCurSizeLabel,        mpm_matl,  Ghost::None);
-
-  t->computes(Mlb->pPressureLabel,   mpm_matl);
-  sched->addTask(t, patches, all_matls);
-}
-
-
-
-//______________________________________________________________________
-//
-void MPMICE::scheduleInterpolateNCToCC_0(SchedulerP& sched,
-                                    const PatchSet* patches,
-                                    const MaterialSubset* one_matl,
-                                    const MaterialSet* mpm_matls)
-{
-  if(d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
-                                getLevel(patches)->getGrid()->numLevels())){
-                                
-    printSchedule(patches,cout_doing, "MPMICE::scheduleInterpolateNCToCC_0");
- 
-    /* interpolateNCToCC */
-    Task* t=scinew Task("MPMICE::interpolateNCToCC_0",
-                        this, &MPMICE::interpolateNCToCC_0);
-    const MaterialSubset* mss = mpm_matls->getUnion();
-    t->requires(Task::NewDW, Mlb->gMassLabel,       Ghost::AroundCells, 1);
-    t->requires(Task::NewDW, Mlb->gVolumeLabel,     Ghost::AroundCells, 1);
-    t->requires(Task::NewDW, Mlb->gVelocityBCLabel, Ghost::AroundCells, 1); 
-    t->requires(Task::NewDW, Mlb->gTemperatureLabel,Ghost::AroundCells, 1);
-    t->requires(Task::NewDW, Mlb->gSp_volLabel,     Ghost::AroundCells, 1);
-    t->requires(Task::OldDW, Mlb->NC_CCweightLabel,one_matl,
-                                                    Ghost::AroundCells, 1);
-    t->requires(Task::OldDW, Ilb->sp_vol_CCLabel,   Ghost::None, 0); 
-    t->requires(Task::OldDW, MIlb->temp_CCLabel,    Ghost::None, 0);
-
-    t->requires(Task::OldDW, Ilb->timeStepLabel);
-    
-    t->computes(MIlb->cMassLabel);
-    t->computes(MIlb->vel_CCLabel);
-    t->computes(MIlb->temp_CCLabel);
-    t->computes(Ilb->sp_vol_CCLabel, mss);
-    t->computes(Ilb->rho_CCLabel, mss); 
-   
-    sched->addTask(t, patches, mpm_matls);
-  }
-}
-
-//______________________________________________________________________
-//
-void MPMICE::scheduleCoarsenCC_0(SchedulerP& sched,
-                                    const PatchSet* patches,
-                                    const MaterialSet* mpm_matls)
-{
-  printSchedule(patches,cout_doing, "MPMICE::scheduleCoarsenCC_0");
- 
-  bool modifies = false;
-
-  scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->cMassLabel,
-                            1.9531e-15,   modifies, "sum");
-                            
-  scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->temp_CCLabel,
-                            0.,           modifies,"massWeighted");
-                            
-  scheduleCoarsenVariableCC(sched, patches, mpm_matls, MIlb->vel_CCLabel,
-                          Vector(0, 0, 0),modifies,"massWeighted");
-                          
-  scheduleCoarsenVariableCC(sched, patches, mpm_matls, Ilb->sp_vol_CCLabel,
-                            0.8479864471, modifies, "massWeighted");
-                            
-  scheduleCoarsenVariableCC(sched, patches, mpm_matls, Ilb->rho_CCLabel,
-                            1.e-12,       modifies, "std");
-}
-
-//______________________________________________________________________
-//
-void MPMICE::scheduleCoarsenNCMass(SchedulerP& sched,
-                                   const PatchSet* patches,
-                                   const MaterialSet* mpm_matls)
-{
-  printSchedule(patches,cout_doing, "MPMICE::scheduleCoarsenNCMass");
-                                                                                
-  bool modifies = false;
-                                                                                
-  scheduleCoarsenVariableNC(sched, patches, mpm_matls, Mlb->gMassLabel,
-                            1.e-200,  modifies, "sum");
-}
-
-//______________________________________________________________________
-//
-void MPMICE::scheduleComputeLagrangianValuesMPM(SchedulerP& sched,
-                                   const PatchSet* patches,
-                                   const MaterialSubset* one_matl,
-                                   const MaterialSet* mpm_matls)
-{
-  if(d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
-                                getLevel(patches)->getGrid()->numLevels())){
-
-    printSchedule(patches,cout_doing, "MPMICE::scheduleComputeLagrangianValuesMPM");
-
-    Task* t=scinew Task("MPMICE::computeLagrangianValuesMPM",
-                        this, &MPMICE::computeLagrangianValuesMPM);
-
-    const MaterialSubset* mss = mpm_matls->getUnion();
-    Ghost::GhostType  gac = Ghost::AroundCells;
-    Ghost::GhostType  gn  = Ghost::None;
-    t->requires(Task::NewDW, Mlb->gVelocityStarLabel, mss, gac,1);
-    t->requires(Task::NewDW, Mlb->gMassLabel,              gac,1);
-    t->requires(Task::NewDW, Mlb->gTemperatureStarLabel,   gac,1);
-    t->requires(Task::OldDW, Mlb->NC_CCweightLabel,       one_matl, gac,1);
-    t->requires(Task::NewDW, MIlb->cMassLabel,             gn);
-    t->requires(Task::NewDW, Ilb->int_eng_source_CCLabel,  gn);
-    t->requires(Task::NewDW, Ilb->mom_source_CCLabel,      gn);
-
-    t->requires(Task::NewDW, MIlb->temp_CCLabel,           gn);
-    t->requires(Task::NewDW, MIlb->vel_CCLabel,            gn);
-
-    t->requires(Task::OldDW, Ilb->timeStepLabel);
-    
-    if(d_ice->d_models.size() > 0 && !do_mlmpmice){
-      t->requires(Task::NewDW, Ilb->modelMass_srcLabel,   gn);
-      t->requires(Task::NewDW, Ilb->modelMom_srcLabel,    gn);
-      t->requires(Task::NewDW, Ilb->modelEng_srcLabel,    gn);
-    }
-
-    t->computes( Ilb->mass_L_CCLabel);
-    t->computes( Ilb->mom_L_CCLabel);
-    t->computes( Ilb->int_eng_L_CCLabel);
-
-    sched->addTask(t, patches, mpm_matls);
-  }
-}
-
+//if (do_mlmpmice)//
 
 //______________________________________________________________________
 //
@@ -902,37 +2353,6 @@ void MPMICE::scheduleCoarsenLagrangianValuesMPM(SchedulerP& sched,
 
 //______________________________________________________________________
 //
-void MPMICE::scheduleComputeCCVelAndTempRates(SchedulerP& sched,
-                                              const PatchSet* patches,
-                                              const MaterialSet* mpm_matls)
-{
-  printSchedule(patches, cout_doing, "MPMICE::scheduleComputeCCVelAndTempRates");
-
-  Task* t=scinew Task("MPMICE::computeCCVelAndTempRates",
-                      this, &MPMICE::computeCCVelAndTempRates);               
-
-  Ghost::GhostType  gn = Ghost::None;
-
-  t->requires(Task::OldDW, Ilb->timeStepLabel);
-  t->requires(Task::OldDW, Ilb->delTLabel,getLevel(patches));
-  t->requires(Task::NewDW, Ilb->mass_L_CCLabel,         gn);
-  t->requires(Task::NewDW, Ilb->mom_L_CCLabel,          gn);  
-  t->requires(Task::NewDW, Ilb->int_eng_L_CCLabel,      gn);  
-  t->requires(Task::NewDW, Ilb->mom_L_ME_CCLabel,       gn);
-  t->requires(Task::NewDW, Ilb->eng_L_ME_CCLabel,       gn);
-  t->requires(Task::NewDW, Ilb->int_eng_source_CCLabel, gn);
-  t->requires(Task::NewDW, Ilb->mom_source_CCLabel,     gn);
-  t->requires(Task::OldDW, Mlb->heatRate_CCLabel,       gn);
-
-  t->computes(Ilb->dTdt_CCLabel);
-  t->computes(Ilb->dVdt_CCLabel);
-  t->computes(Mlb->heatRate_CCLabel);
-
-  sched->addTask(t, patches, mpm_matls);
-}
-
-//______________________________________________________________________
-//
 void MPMICE::scheduleRefineCC(SchedulerP& sched,
                               const PatchSet* patches,
                               const MaterialSet* mpm_matls)
@@ -946,1484 +2366,11 @@ void MPMICE::scheduleRefineCC(SchedulerP& sched,
   scheduleRefineVariableCC(sched, patches, mpm_matls, Ilb->dVdt_CCLabel);
 }
 
-//______________________________________________________________________
-//
-void MPMICE::scheduleInterpolateCCToNC(SchedulerP& sched,
-                                       const PatchSet* patches,
-                                       const MaterialSet* mpm_matls)
-{
-  if(!d_mpm->flags->doMPMOnLevel(getLevel(patches)->getIndex(),
-                                 getLevel(patches)->getGrid()->numLevels()))
-    return;
-
-  printSchedule(patches, cout_doing, "MPMICE::scheduleInterpolateCCToNC");  
-                                                                                
-  Task* t=scinew Task("MPMICE::interpolateCCToNC",
-                      this, &MPMICE::interpolateCCToNC);
-  const MaterialSubset* mss = mpm_matls->getUnion();
-  Ghost::GhostType  gan = Ghost::AroundNodes;
-  Ghost::GhostType  gac = Ghost::AroundCells;
-                                                                                
-  t->requires(Task::OldDW, Ilb->delTLabel,getLevel(patches));
-  t->requires(Task::NewDW, Ilb->dVdt_CCLabel,       gan,1);
-  t->requires(Task::NewDW, Ilb->dTdt_CCLabel,       gan,1);
-  
-  if(d_ice->d_models.size() > 0){
-    t->requires(Task::NewDW, MIlb->cMassLabel,       gac,1);
-    t->requires(Task::NewDW,Ilb->modelMass_srcLabel, gac,1);
-  }     
-                                                                                
-  t->modifies(Mlb->gVelocityStarLabel, mss);
-  t->modifies(Mlb->gAccelerationLabel, mss);
-  t->computes(Mlb->massBurnFractionLabel,mss);
-  t->computes(Mlb->dTdt_NCLabel);
-
-  sched->addTask(t, patches, mpm_matls);
-}
-
-/*_____________________________________________________________________
- Function~  MPMICE::scheduleComputePressure--
- Note:  Handles both Rate and Equilibration form of solution technique
-_____________________________________________________________________*/
-void MPMICE::scheduleComputePressure(SchedulerP& sched,
-                                     const PatchSet* patches,
-                                     const MaterialSubset* ice_matls,
-                                     const MaterialSubset* mpm_matls,
-                                     const MaterialSubset* press_matl,
-                                     const MaterialSet* all_matls)
-{
-  Task* t = nullptr;
-
-  printSchedule(patches, cout_doing,"MPMICE::scheduleComputeEquilibrationPressure");
-
-  t = scinew Task("MPMICE::computeEquilibrationPressure",
-            this, &MPMICE::computeEquilibrationPressure, press_matl);
-  
-  t->requires(Task::OldDW, Ilb->timeStepLabel);
-  t->requires(Task::OldDW, Ilb->delTLabel,getLevel(patches));
-
-                              // I C E
-  Ghost::GhostType  gn  = Ghost::None;
-
-  t->requires(Task::OldDW,Ilb->temp_CCLabel,       ice_matls, gn);  
-  t->requires(Task::OldDW,Ilb->rho_CCLabel,        ice_matls, gn);  
-  t->requires(Task::OldDW,Ilb->sp_vol_CCLabel,     ice_matls, gn);  
-  t->requires(Task::NewDW,Ilb->specific_heatLabel, ice_matls, gn);  
-  t->requires(Task::NewDW,Ilb->gammaLabel,         ice_matls, gn);  
-
-                              // M P M
-  t->requires(Task::NewDW,MIlb->temp_CCLabel,      mpm_matls, gn);  
-  t->requires(Task::NewDW,Ilb->rho_CCLabel,        mpm_matls, gn);  
-  t->requires(Task::NewDW,Ilb->sp_vol_CCLabel,     mpm_matls, gn);  
-
-  t->requires(Task::OldDW,Ilb->press_CCLabel,      press_matl, gn);
-  t->requires(Task::OldDW,Ilb->vel_CCLabel,        ice_matls,  gn);
-  t->requires(Task::NewDW,MIlb->vel_CCLabel,       mpm_matls,  gn);
-
-
-  computesRequires_CustomBCs(t, "EqPress", Ilb, ice_matls, 
-                            d_ice->d_BC_globalVars);
-                              
-                              //  A L L _ M A T L S
-  t->computes(Ilb->f_theta_CCLabel);
-  t->computes(Ilb->compressibilityLabel, ice_matls);
-  t->computes(Ilb->compressibilityLabel, mpm_matls);
-
-  t->computes(Ilb->speedSound_CCLabel); 
-  t->computes(Ilb->vol_frac_CCLabel);
-  t->computes(Ilb->sumKappaLabel,       press_matl);
-  t->computes(Ilb->TMV_CCLabel,         press_matl);
-  t->computes(Ilb->press_equil_CCLabel, press_matl);  
-  t->computes(Ilb->sum_imp_delPLabel,   press_matl);  // needed by implicit ICE
-  t->computes(Ilb->eq_press_itersLabel, press_matl);
-  
-  t->modifies(Ilb->sp_vol_CCLabel,      mpm_matls);
-  t->computes(Ilb->sp_vol_CCLabel,      ice_matls);
-  t->computes(Ilb->rho_CCLabel,         ice_matls);
-  
-  sched->addTask(t, patches, all_matls);
-}
-
 void MPMICE::scheduleSwitchTest(const LevelP& level, SchedulerP& sched)
 {
   if (d_switchCriteria) {
     d_switchCriteria->scheduleSwitchTest(level,sched);
   }
-}
-
-//______________________________________________________________________
-//       A C T U A L   S T E P S :
-//______________________________________________________________________
-void MPMICE::actuallyInitialize(const ProcessorGroup*, 
-                            const PatchSubset* patches,
-                            const MaterialSubset* ,
-                            DataWarehouse*,
-                            DataWarehouse* new_dw)
-{
-  timeStep_vartype timeStep;
-  new_dw->get(timeStep, VarLabel::find( timeStep_name) );
-
-  bool isNotInitialTimeStep = (timeStep > 0);
-
-  for(int p=0;p<patches->size();p++){ 
-    const Patch* patch = patches->get(p);
-    printTask(patches, patch, cout_doing,"Doing actuallyInitialize ");
-    //__________________________________
-    //output material indices
-    if(patch->getID() == 0){
-      cout << "Materials Indicies:   MPM ["<< *(m_materialManager->allMaterials( "MPM" ))  << "] " 
-           << "ICE["<< *(m_materialManager->allMaterials( "ICE" )) << "]" << endl;
-
-      cout << "Material Names:";
-      unsigned int numAllMatls = m_materialManager->getNumMatls();
-      for (unsigned int m = 0; m < numAllMatls; m++) {
-        Material* matl = m_materialManager->getMaterial( m );
-        cout <<" " << matl->getDWIndex() << ") " << matl->getName();
-      }
-      cout << "\n";
-    }
-
-    // Sum variable for testing that the volume fractions sum to 1
-    CCVariable<double> vol_frac_sum;
-    new_dw->allocateTemporary(vol_frac_sum, patch);
-    vol_frac_sum.initialize(0.0);
-
-    //__________________________________
-    //  Initialize CCVaribles for MPM Materials
-    //  Even if mass = 0 in a cell you still need
-    //  CC Variables defined.
-    double junk=-9, tmp;
-    unsigned int numMPM_matls = m_materialManager->getNumMatls( "MPM" );
-    double p_ref = d_ice->getRefPress();
-    for (unsigned int m = 0; m < numMPM_matls; m++ ) {
-      CCVariable<double> rho_micro, sp_vol_CC, rho_CC, Temp_CC, speedSound, vol_frac_CC;
-      CCVariable<Vector> vel_CC;
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM", m);
-      int indx= mpm_matl->getDWIndex();
-      new_dw->allocateTemporary(rho_micro, patch);
-      // Allocate volume fraction for use in intializeCCVariables
-      new_dw->allocateTemporary(vol_frac_CC,patch);
-      new_dw->allocateAndPut(sp_vol_CC,   Ilb->sp_vol_CCLabel,    indx,patch);
-      new_dw->allocateAndPut(rho_CC,      Ilb->rho_CCLabel,       indx,patch);
-      new_dw->allocateAndPut(speedSound,  Ilb->speedSound_CCLabel,indx,patch);
-      new_dw->allocateAndPut(Temp_CC,    MIlb->temp_CCLabel,      indx,patch);
-      new_dw->allocateAndPut(vel_CC,     MIlb->vel_CCLabel,       indx,patch);
-
-
-      CCVariable<double> heatFlux;
-      new_dw->allocateAndPut(heatFlux, Mlb->heatRate_CCLabel,    indx, patch);
-      heatFlux.initialize(0.0);
-
-      mpm_matl->initializeCCVariables(rho_micro,   rho_CC,
-                                      Temp_CC,     vel_CC,  
-                                      vol_frac_CC, patch);
-
-      setBC(rho_CC,    "Density",      patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(rho_micro, "Density",      patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(Temp_CC,   "Temperature",  patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(vel_CC,    "Velocity",     patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      for (CellIterator iter = patch->getExtraCellIterator();
-                                                        !iter.done();iter++){
-        IntVector c = *iter;
-        sp_vol_CC[c] = 1.0/rho_micro[c];
-
-        mpm_matl->getConstitutiveModel()->
-            computePressEOSCM(rho_micro[c],junk, p_ref, junk, tmp,mpm_matl,Temp_CC[c]); 
-        speedSound[c] = sqrt(tmp);
-
-        // sum volume fraction
-        vol_frac_sum[c] += vol_frac_CC[c];
-      }
-      
-      //__________________________________
-      //    B U L L E T   P R O O F I N G
-      IntVector neg_cell;
-      ostringstream warn;
-      if( !areAllValuesPositive(rho_CC, neg_cell) ) {
-        Point pt = patch->getCellPosition(neg_cell);
-        warn<<"ERROR MPMICE::actuallyInitialize, mat "<<indx<< " cell "
-            <<neg_cell << " position " << pt << " rho_CC is negative\n";
-        throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-      }
-      if( !areAllValuesPositive(Temp_CC, neg_cell) ) {
-        Point pt = patch->getCellPosition(neg_cell);
-        
-        warn<<"ERROR MPMICE::actuallyInitialize, mat "<<indx<< " cell "
-            <<neg_cell << " position " << pt << " Temp_CC is negative\n";
-        throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-      }
-      if( !areAllValuesPositive(sp_vol_CC, neg_cell) ) {
-        Point pt = patch->getCellPosition(neg_cell);
-        
-        warn<<"ERROR MPMICE::actuallyInitialize, mat "<<indx<< " cell "
-            <<neg_cell << " position " << pt << " sp_vol_CC is negative\n";
-        throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-      }
-      if( !areAllValuesNumbers(speedSound, neg_cell) ) {
-        Point pt = patch->getCellPosition(neg_cell);
-        
-        warn<<"ERROR MPMICE::actuallyInitialize, mat "<<indx<< " cell "
-            <<neg_cell << " position " << pt << " speedSound is nan\n";
-        warn << "speedSound = " << speedSound[neg_cell] << " sp_vol_CC = " << sp_vol_CC[neg_cell]
-             << " rho_micro = " << rho_micro[neg_cell] << " Temp_CC = " << Temp_CC[neg_cell] << endl;
-        throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-      }             
-    }  // num_MPM_matls loop 
-
-    //___________________________________
-    //   B U L L E T  P R O O F I N G
-    // Verify volume fractions sum to 1.0
-    // Loop through ICE materials to get their contribution to volume fraction
-    unsigned int numICE_matls = m_materialManager->getNumMatls( "ICE" );
-    for (unsigned int m = 0; m < numICE_matls; m++ ) {
-      constCCVariable<double> vol_frac;
-      ICEMaterial* ice_matl = (ICEMaterial*) m_materialManager->getMaterial( "ICE", m);
-      int indx= ice_matl->getDWIndex();
-
-      // Get the Volume Fraction computed in ICE's actuallyInitialize(...)
-      new_dw->get(vol_frac, Ilb->vol_frac_CCLabel, indx, patch, Ghost::None, 0);
-      
-      for (CellIterator iter = patch->getCellIterator(); !iter.done();iter++){
-        IntVector c = *iter;
-        vol_frac_sum[c] += vol_frac[c];
-      }
-    }  // num_ICE_matls loop
-
-    double errorThresholdTop    = 1.0e0 + 1.0e-10;
-    double errorThresholdBottom = 1.0e0 - 1.0e-10;
-
-    for (CellIterator iter = patch->getCellIterator(); !iter.done();iter++){
-      IntVector c = *iter;
-      Point pt = patch->getCellPosition(c);
-      
-      if(!(vol_frac_sum[c] <= errorThresholdTop && vol_frac_sum[c] >= errorThresholdBottom)){\
-        ostringstream warn;
-        warn << "ERROR MPMICE::actuallyInitialize cell " << *iter << " position" << pt << "\n\n"
-             << "volume fraction ("<< std::setprecision(13)<< vol_frac_sum[*iter] << ") does not sum to 1.0 +- 1e-10.\n"
-             << "Verify that this region of the domain contains at least 1 geometry object.  If you're using the optional\n"
-             << "'volumeFraction' tags verify that they're correctly specified.\n";
-        throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-      }
-    } // cell iterator for volume fraction
-  } // Patch loop
-}
-
-//______________________________________________________________________
-//
-void MPMICE::interpolatePressCCToPressNC(const ProcessorGroup*,
-                                    const PatchSubset* patches,
-                                    const MaterialSubset* ,
-                                    DataWarehouse*,
-                                    DataWarehouse* new_dw)
-{                            
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing interpolatePressCCToPressNC");
-
-    constCCVariable<double> pressCC;
-    NCVariable<double> pressNC;
-
-    Ghost::GhostType  gac = Ghost::AroundCells;
-    new_dw->get(pressCC, Ilb->press_CCLabel, 0, patch, gac, 1);
-    new_dw->allocateAndPut(pressNC, MIlb->press_NCLabel, 0, patch);
-    pressNC.initialize(0.0);
-    
-    IntVector cIdx[8];
-    // Interpolate CC pressure to nodes
-    for(NodeIterator iter = patch->getNodeIterator(); !iter.done(); iter++){
-       patch->findCellsFromNode(*iter,cIdx);
-      for (int in=0;in<8;in++){
-        pressNC[*iter]  += .125*pressCC[cIdx[in]];
-      }
-    }
-
-    // Apply grid boundary conditions to the pressure before storing the data
-    string inter_type = d_mpm->flags->d_interpolator_type;
-    MPMBoundCond bc;
-    bc.setBoundaryCondition(patch,0,"Pressure",   pressNC,   inter_type);
-  }
-}
-
-//______________________________________________________________________
-//
-void MPMICE::interpolatePAndGradP(const ProcessorGroup*,
-                                  const PatchSubset* patches,
-                                  const MaterialSubset* ,
-                                  DataWarehouse* old_dw,
-                                  DataWarehouse* new_dw)
-{
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing interpolatePressureToParticles");
-
-    ParticleInterpolator* interpolator = d_mpm->flags->d_interpolator->clone(patch);
-    vector<IntVector> ni(interpolator->size());
-    vector<double> S(interpolator->size());
-
-    double p_ref = d_ice->getRefPress();
-    constNCVariable<double>   pressNC;    
-    Ghost::GhostType  gac = Ghost::AroundCells;
-    new_dw->get(pressNC, MIlb->press_NCLabel,  0, patch, gac, NGN);
-
-    for(unsigned int m = 0; m < m_materialManager->getNumMatls( "MPM" ); m++){
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM",  m );
-      int indx = mpm_matl->getDWIndex();
-
-      ParticleSubset* pset = old_dw->getParticleSubset(indx, patch);
-      ParticleVariable<double> pPressure;
-      constParticleVariable<Point> px;
-      constParticleVariable<Matrix3> psize;
-      constParticleVariable<Matrix3> deformationGradient;
-      new_dw->get(psize,                Mlb->pCurSizeLabel,  pset);     
-      old_dw->get(px,                   Mlb->pXLabel,        pset);     
-      new_dw->allocateAndPut(pPressure, Mlb->pPressureLabel, pset);     
-
-     //__________________________________
-     // Interpolate NC pressure to particles
-      for(ParticleSubset::iterator iter = pset->begin();
-         iter != pset->end(); iter++){
-        particleIndex idx = *iter;
-        double press = 0.;
-
-        // Get the node indices that surround the cell
-        int NN = interpolator->findCellAndWeights(px[idx], ni, S,psize[idx]);
-
-        for (int k = 0; k < NN; k++) {
-          press += pressNC[ni[k]] * S[k];
-        }
-        pPressure[idx] = press-p_ref;
-      }
-    }  // numMPMMatls
-    delete interpolator;
-  } //patches
-}
-
-//______________________________________________________________________
-//
-void MPMICE::interpolateNCToCC_0(const ProcessorGroup*,
-                                 const PatchSubset* patches,
-                                 const MaterialSubset* ,
-                                 DataWarehouse* old_dw,
-                                 DataWarehouse* new_dw)
-{
-  timeStep_vartype timeStep;
-  old_dw->get(timeStep, VarLabel::find( timeStep_name) );
-
-  bool isNotInitialTimeStep = (timeStep > 0);
-
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing interpolateNCToCC_0");
-
-    unsigned int numMatls = m_materialManager->getNumMatls( "MPM" );
-    Vector dx = patch->dCell();
-    double cell_vol = dx.x()*dx.y()*dx.z(); 
-    Ghost::GhostType  gac = Ghost::AroundCells;
-    Ghost::GhostType  gn = Ghost::None;
-    
-    constNCVariable<double> NC_CCweight;
-    old_dw->get(NC_CCweight, Mlb->NC_CCweightLabel,  0, patch, gac, 1);
-
-    for(unsigned int m = 0; m < numMatls; m++){
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM",  m );
-      int indx = mpm_matl->getDWIndex();
-      // Create arrays for the grid data
-      constNCVariable<double> gmass, gvolume, gtemperature, gSp_vol;
-      constNCVariable<Vector> gvelocity;
-      CCVariable<double> cmass,Temp_CC, sp_vol_CC, rho_CC;
-      CCVariable<Vector> vel_CC;
-      constCCVariable<double> Temp_CC_ice, sp_vol_CC_ice;
-
-      new_dw->allocateAndPut(cmass,    MIlb->cMassLabel,     indx, patch);  
-      new_dw->allocateAndPut(vel_CC,   MIlb->vel_CCLabel,    indx, patch);  
-      new_dw->allocateAndPut(Temp_CC,  MIlb->temp_CCLabel,   indx, patch);  
-      new_dw->allocateAndPut(sp_vol_CC, Ilb->sp_vol_CCLabel, indx, patch); 
-      new_dw->allocateAndPut(rho_CC,    Ilb->rho_CCLabel,    indx, patch);
-      
-      double very_small_mass = d_TINY_RHO * cell_vol;
-      cmass.initialize(very_small_mass);
-
-      new_dw->get(gmass,        Mlb->gMassLabel,        indx, patch,gac, 1);
-      new_dw->get(gvolume,      Mlb->gVolumeLabel,      indx, patch,gac, 1);
-      new_dw->get(gvelocity,    Mlb->gVelocityBCLabel,  indx, patch,gac, 1);
-      new_dw->get(gtemperature, Mlb->gTemperatureLabel, indx, patch,gac, 1);
-      new_dw->get(gSp_vol,      Mlb->gSp_volLabel,      indx, patch,gac, 1);
-      old_dw->get(sp_vol_CC_ice,Ilb->sp_vol_CCLabel,    indx, patch,gn, 0); 
-      old_dw->get(Temp_CC_ice,  MIlb->temp_CCLabel,     indx, patch,gn, 0);
-      IntVector nodeIdx[8];
-
-//      double sp_vol_orig = 1.0/(mpm_matl->getInitialDensity());
-       
-      //__________________________________
-      //  compute CC Variables
-      for(CellIterator iter =patch->getExtraCellIterator();!iter.done();iter++){
-        IntVector c = *iter;
-        patch->findNodesFromCell(*iter,nodeIdx);
- 
-        double Temp_CC_mpm = 0.0;  
-        double sp_vol_mpm = 0.0;   
-        Vector vel_CC_mpm  = Vector(0.0, 0.0, 0.0);
-        
-        for (int in=0;in<8;in++){
-          double NC_CCw_mass = NC_CCweight[nodeIdx[in]] * gmass[nodeIdx[in]];
-          cmass[c]    += NC_CCw_mass;
-          sp_vol_mpm  += gSp_vol[nodeIdx[in]]      * NC_CCw_mass;
-          vel_CC_mpm  += gvelocity[nodeIdx[in]]    * NC_CCw_mass;
-          Temp_CC_mpm += gtemperature[nodeIdx[in]] * NC_CCw_mass;
-        }
-        double inv_cmass = 1.0/cmass[c];
-        vel_CC_mpm  *= inv_cmass;    
-        Temp_CC_mpm *= inv_cmass;
-        sp_vol_mpm  *= inv_cmass;
-
-        //__________________________________
-        // set *_CC = to either vel/Temp_CC_mpm or some safe values
-        // depending upon if there is cmass.  You need
-        // a well defined vel/temp_CC even if there isn't any mass
-        // If you change this you must also change 
-        // MPMICE::computeLagrangianValuesMPM
-        double one_or_zero = (cmass[c] - very_small_mass)/cmass[c];
-
-//        Temp_CC[c]  =(1.0-one_or_zero)*999.        + one_or_zero*Temp_CC_mpm;
-//        sp_vol_CC[c]=(1.0-one_or_zero)*sp_vol_orig + one_or_zero*sp_vol_mpm;
-
-        Temp_CC[c]  =(1.0-one_or_zero)*Temp_CC_ice[c]  +one_or_zero*Temp_CC_mpm;
-        sp_vol_CC[c]=(1.0-one_or_zero)*sp_vol_CC_ice[c]+one_or_zero*sp_vol_mpm;
-
-        vel_CC[c]   =vel_CC_mpm;
-        rho_CC[c]   = cmass[c]/cell_vol;
-      }
-
-      //  Set BC's
-      setBC(Temp_CC, "Temperature",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(rho_CC,  "Density",    patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(vel_CC,  "Velocity",   patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      //  Set if symmetric Boundary conditions
-      setBC(cmass,    "set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(sp_vol_CC,"set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep); 
-
-      //---- B U L L E T   P R O O F I N G------
-      // ignore BP if recompute time step has already been requested
-      IntVector neg_cell;
-      ostringstream warn;
-      bool rts = new_dw->recomputeTimeStep();
-      
-      int L = getLevel(patches)->getIndex();
-      if(d_testForNegTemps_mpm){
-        if (!areAllValuesPositive(Temp_CC, neg_cell) && !rts) {
-          warn <<"ERROR MPMICE:("<< L<<"):interpolateNCToCC_0, mat "<< indx 
-               <<" cell "
-               << neg_cell << " Temp_CC " << Temp_CC[neg_cell] << "\n ";
-          throw InvalidValue(warn.str(), __FILE__, __LINE__);
-        }
-      }
-      if (!areAllValuesPositive(rho_CC, neg_cell) && !rts) {
-        warn <<"ERROR MPMICE:("<< L<<"):interpolateNCToCC_0, mat "<< indx 
-             <<" cell " << neg_cell << " rho_CC " << rho_CC[neg_cell]<< "\n ";
-        throw InvalidValue(warn.str(), __FILE__, __LINE__);
-      }
-      if (!areAllValuesPositive(sp_vol_CC, neg_cell) && !rts) {
-        warn <<"ERROR MPMICE:("<< L<<"):interpolateNCToCC_0, mat "<< indx 
-             <<" cell "
-             << neg_cell << " sp_vol_CC " << sp_vol_CC[neg_cell]<<"\n ";
-        throw InvalidValue(warn.str(), __FILE__, __LINE__);
-      } 
-    }
-  }  //patches
-}
-
-//______________________________________________________________________
-//
-void MPMICE::computeLagrangianValuesMPM(const ProcessorGroup*,
-                               const PatchSubset* patches,
-                               const MaterialSubset* ,
-                               DataWarehouse* old_dw,
-                               DataWarehouse* new_dw)
-{
-  timeStep_vartype timeStep;
-  old_dw->get(timeStep, VarLabel::find( timeStep_name) );
-
-  bool isNotInitialTimeStep = (timeStep > 0);
-
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing computeLagrangianValuesMPM");
-
-    unsigned int numMatls = m_materialManager->getNumMatls( "MPM" );
-    Vector dx = patch->dCell();
-    double cellVol = dx.x()*dx.y()*dx.z();
-    double very_small_mass = d_TINY_RHO * cellVol; 
-    Ghost::GhostType  gn = Ghost::None;
-    Ghost::GhostType  gac = Ghost::AroundCells;         
-         
-    constNCVariable<double> NC_CCweight;
-    old_dw->get(NC_CCweight,       Mlb->NC_CCweightLabel, 0,patch, gac, 1);
-    for(unsigned int m = 0; m < numMatls; m++){
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM",  m );
-      int indx = mpm_matl->getDWIndex();
-
-      // Create arrays for the grid data
-      constNCVariable<double> gmass, gvolume,gtempstar;
-      constNCVariable<Vector> gvelocity;
-      CCVariable<Vector> cmomentum;
-      CCVariable<double> int_eng_L, mass_L;
-      constCCVariable<double> cmass, Temp_CC_sur, int_eng_src;
-      constCCVariable<Vector> vel_CC_sur, mom_source;
-      new_dw->get(gmass,       Mlb->gMassLabel,             indx,patch,gac,1);
-      new_dw->get(gvelocity,   Mlb->gVelocityStarLabel,     indx,patch,gac,1);
-      new_dw->get(gtempstar,   Mlb->gTemperatureStarLabel,  indx,patch,gac,1);
-      new_dw->get(cmass,       MIlb->cMassLabel,            indx,patch,gn, 0);
-      new_dw->get(Temp_CC_sur, MIlb->temp_CCLabel,          indx,patch,gn, 0);
-      new_dw->get(vel_CC_sur,  MIlb->vel_CCLabel,           indx,patch,gn, 0);
-      new_dw->get(mom_source,   Ilb->mom_source_CCLabel,    indx,patch,gn, 0);
-      new_dw->get(int_eng_src,  Ilb->int_eng_source_CCLabel,indx,patch,gn, 0);
-
-      new_dw->allocateAndPut(mass_L,    Ilb->mass_L_CCLabel,   indx,patch); 
-      new_dw->allocateAndPut(cmomentum, Ilb->mom_L_CCLabel,    indx,patch);
-      new_dw->allocateAndPut(int_eng_L, Ilb->int_eng_L_CCLabel,indx,patch);
-
-      cmomentum.initialize(Vector(0.0, 0.0, 0.0));
-      int_eng_L.initialize(0.);
-      mass_L.initialize(0.); 
-      double cv = mpm_matl->getSpecificHeat();
-
-      IntVector nodeIdx[8];
- 
-      for(CellIterator iter = patch->getExtraCellIterator();!iter.done();
-                                                          iter++){ 
-        IntVector c = *iter;
-        patch->findNodesFromCell(c,nodeIdx);
-        double int_eng_L_mpm = 0.0;
-        double int_eng_L_sur = cmass[c] * Temp_CC_sur[c] * cv;
-        Vector cmomentum_mpm = Vector(0.0, 0.0, 0.0);
-        Vector cmomentum_sur = vel_CC_sur[c] * cmass[c];
-        
-        for (int in=0;in<8;in++){
-          double NC_CCw_mass = NC_CCweight[nodeIdx[in]] * gmass[nodeIdx[in]];
-          cmomentum_mpm +=gvelocity[nodeIdx[in]]      * NC_CCw_mass;
-          int_eng_L_mpm +=gtempstar[nodeIdx[in]] * cv * NC_CCw_mass;
-        }
-        int_eng_L_mpm += int_eng_src[c];
-        if(!d_rigidMPM){
-          cmomentum_mpm += mom_source[c];
-        }
-        //__________________________________
-        // set cmomentum/int_eng_L to either 
-        // what's calculated from mpm or 
-        // the surrounding value.
-        // If you change this you must also change MPMICE::interpolateNCToCC_0  
-        double one_or_zero = (cmass[c] - very_small_mass)/cmass[c];
-        cmomentum[c] = (1.0 - one_or_zero)* cmomentum_sur + 
-                              one_or_zero * cmomentum_mpm;
-        int_eng_L[c] = (1.0 - one_or_zero)* int_eng_L_sur + 
-                              one_or_zero * int_eng_L_mpm;
-      }
-      //__________________________________
-      //  NO REACTION
-      if(d_ice->d_models.size() == 0 || do_mlmpmice)  { 
-        for(CellIterator iter = patch->getExtraCellIterator();!iter.done();
-                                                    iter++){ 
-         IntVector c = *iter;
-         mass_L[c]    = cmass[c];
-        }
-      }
-      //__________________________________
-      //   M O D E L   B A S E D   E X C H A N G E
-      // The reaction can't completely eliminate 
-      //  all the mass, momentum and internal E.
-      // If it does then we'll get erroneous vel,
-      // and temps in CCMomExchange.  If the mass
-      // goes to min_mass then cmomentum and int_eng_L
-      // need to be scaled by min_mass to avoid inf temp and vel_CC
-      // in 
-      if(d_ice->d_models.size() > 0 && !do_mlmpmice){
-        constCCVariable<double> modelMass_src;
-        constCCVariable<double> modelEng_src;
-        constCCVariable<Vector> modelMom_src;
-        new_dw->get(modelMass_src,Ilb->modelMass_srcLabel,indx, patch, gn, 0);
-        new_dw->get(modelMom_src, Ilb->modelMom_srcLabel, indx, patch, gn, 0);
-        new_dw->get(modelEng_src, Ilb->modelEng_srcLabel, indx, patch, gn, 0);
-                
-        for(CellIterator iter = patch->getExtraCellIterator();!iter.done();
-                                                    iter++){
-          IntVector c = *iter;
-          //  must have a minimum mass
-          double min_mass = very_small_mass;
-          double inv_cmass = 1.0/cmass[c];
-          mass_L[c] = std::max( (cmass[c] + modelMass_src[c] ), min_mass);
-
-          //  must have a minimum momentum 
-          for (int dir = 0; dir <3; dir++) {  //loop over all three directons
-            double min_mom_L = min_mass * cmomentum[c][dir] * inv_cmass;
-            double mom_L_tmp = cmomentum[c][dir] + modelMom_src[c][dir];
-
-            // Preserve the original sign on momemtum     
-            // Use d_SMALL_NUMs to avoid nans when mom_L_temp = 0.0
-            double plus_minus_one = (mom_L_tmp+d_SMALL_NUM)/
-                                    (fabs(mom_L_tmp+d_SMALL_NUM));
-
-            mom_L_tmp = (mom_L_tmp/mass_L[c] ) * (cmass[c] + modelMass_src[c] );
-                                
-            cmomentum[c][dir] = plus_minus_one *
-                                std::max( fabs(mom_L_tmp), fabs(min_mom_L) );
-          }
-          // must have a minimum int_eng   
-          double min_int_eng = min_mass * int_eng_L[c] * inv_cmass;
-          int_eng_L[c] = (int_eng_L[c]/mass_L[c]) * (cmass[c]+modelMass_src[c]);
-          int_eng_L[c] = std::max((int_eng_L[c] + modelEng_src[c]),min_int_eng);
-        }
-      }  // if(model.size() >0)      
-       
-       //__________________________________
-       //  Set Boundary conditions
-       setBC(cmomentum, "set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-       setBC(int_eng_L, "set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      
-      //---- B U L L E T   P R O O F I N G------
-      // ignore BP if recompute time step has already been requested
-      IntVector neg_cell;
-      ostringstream warn;
-      bool rts = new_dw->recomputeTimeStep();
-      
-      if(d_testForNegTemps_mpm){
-        if (!areAllValuesPositive(int_eng_L, neg_cell) && !rts) {
-          int L = getLevel(patches)->getIndex();
-          warn <<"ERROR MPMICE:("<< L<<"):computeLagrangianValuesMPM, mat "
-               << indx<<" cell "
-               << neg_cell << " int_eng_L_CC " << int_eng_L[neg_cell] << "\n ";
-          throw InvalidValue(warn.str(), __FILE__, __LINE__);
-        }
-      }
-    }  //numMatls
-  }  //patches
-}
-
-//______________________________________________________________________
-//
-void MPMICE::computeCCVelAndTempRates(const ProcessorGroup*,
-                            const PatchSubset* patches,
-                            const MaterialSubset* ,
-                            DataWarehouse* old_dw,
-                            DataWarehouse* new_dw)
-{ 
-  timeStep_vartype timeStep;
-  old_dw->get(timeStep, VarLabel::find( timeStep_name) );
-
-  bool isNotInitialTimeStep = (timeStep > 0);
-
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing computeCCVelAndTempRates");
-
-    //__________________________________
-    // This is where I interpolate the CC 
-    // changes to NCs for the MPMMatls
-    unsigned int numMPMMatls = m_materialManager->getNumMatls( "MPM" );
-
-    delt_vartype delT;
-    old_dw->get(delT, Ilb->delTLabel);
-
-    for (unsigned int m = 0; m < numMPMMatls; m++) {
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM",  m );
-      int indx = mpm_matl->getDWIndex();
-      CCVariable<double> dTdt_CC,heatRate;
-      CCVariable<Vector> dVdt_CC;
-
-      constCCVariable<double> mass_L_CC, old_heatRate;
-      constCCVariable<Vector> mom_L_ME_CC, old_mom_L_CC, mom_source;
-      constCCVariable<double> eng_L_ME_CC, old_int_eng_L_CC, int_eng_src;
-      
-      double cv = mpm_matl->getSpecificHeat();     
-
-      Ghost::GhostType  gn = Ghost::None;
-      new_dw->get(old_mom_L_CC,    Ilb->mom_L_CCLabel,       indx,patch,gn, 0);
-      new_dw->get(old_int_eng_L_CC,Ilb->int_eng_L_CCLabel,   indx,patch,gn, 0);
-      new_dw->get(mass_L_CC,       Ilb->mass_L_CCLabel,      indx,patch,gn, 0);
-      new_dw->get(mom_L_ME_CC,     Ilb->mom_L_ME_CCLabel,    indx,patch,gn, 0);
-      new_dw->get(eng_L_ME_CC,     Ilb->eng_L_ME_CCLabel,    indx,patch,gn, 0);
-      old_dw->get(old_heatRate,    Mlb->heatRate_CCLabel,    indx,patch,gn, 0);
-      new_dw->get(mom_source,      Ilb->mom_source_CCLabel,  indx,patch,gn, 0);
-      new_dw->get(int_eng_src,   Ilb->int_eng_source_CCLabel,indx,patch,gn, 0);
-
-      new_dw->allocateAndPut(dTdt_CC,     Ilb->dTdt_CCLabel,    indx, patch);
-      new_dw->allocateAndPut(dVdt_CC,     Ilb->dVdt_CCLabel,    indx, patch);
-      new_dw->allocateAndPut(heatRate,    Mlb->heatRate_CCLabel,indx, patch);
-
-      dTdt_CC.initialize(0.0);
-      dVdt_CC.initialize(Vector(0.0));
-      //__________________________________
-      for(CellIterator iter =patch->getExtraCellIterator();!iter.done();iter++){
-         IntVector c = *iter;
-         if(!d_rigidMPM){
-           dVdt_CC[c] = (mom_L_ME_CC[c] - (old_mom_L_CC[c]-mom_source[c]))
-                                                      /(mass_L_CC[c]*delT);
-         }
-         dTdt_CC[c]   = (eng_L_ME_CC[c] - (old_int_eng_L_CC[c]-int_eng_src[c]))
-                           /(mass_L_CC[c] * cv * delT);
-         double heatRte  = (eng_L_ME_CC[c] - old_int_eng_L_CC[c])/delT;
-         heatRate[c] = .05*heatRte + .95*old_heatRate[c];
-      }
-      setBC(dTdt_CC,    "set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-      setBC(dVdt_CC,    "set_if_sym_BC",patch, m_materialManager, indx, new_dw, isNotInitialTimeStep);
-    }
-  }  //patches
-}
-
-//______________________________________________________________________
-//
-void MPMICE::interpolateCCToNC(const ProcessorGroup*,
-                               const PatchSubset* patches,
-                               const MaterialSubset* ,
-                               DataWarehouse* old_dw,
-                               DataWarehouse* new_dw)
-{ 
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing interpolateCCToNC");
-
-    //__________________________________
-    // This is where I interpolate the CC 
-    // changes to NCs for the MPMMatls
-    unsigned int numMPMMatls = m_materialManager->getNumMatls( "MPM" );
-
-    delt_vartype delT;
-    old_dw->get(delT, Ilb->delTLabel);
-
-    for (unsigned int m = 0; m < numMPMMatls; m++) {
-      MPMMaterial* mpm_matl = (MPMMaterial*) m_materialManager->getMaterial( "MPM",  m );
-      int indx = mpm_matl->getDWIndex();
-      NCVariable<Vector> gacceleration, gvelocity;
-      NCVariable<double> dTdt_NC,massBurnFraction;
-
-      constCCVariable<double> dTdt_CC;
-      constCCVariable<Vector> dVdt_CC;
-      
-      new_dw->getModifiable(gvelocity,    Mlb->gVelocityStarLabel,indx,patch);
-      new_dw->getModifiable(gacceleration,Mlb->gAccelerationLabel,indx,patch);
-                  
-      Ghost::GhostType  gan = Ghost::AroundNodes;
-      new_dw->get(dTdt_CC,    Ilb->dTdt_CCLabel,   indx,patch,gan,1);
-      new_dw->get(dVdt_CC,    Ilb->dVdt_CCLabel,   indx,patch,gan,1);
-      
-      new_dw->allocateAndPut(massBurnFraction, 
-                                      Mlb->massBurnFractionLabel,indx,patch);
-      new_dw->allocateAndPut(dTdt_NC, Mlb->dTdt_NCLabel,    indx, patch);
-      
-      dTdt_NC.initialize(0.0);
-      massBurnFraction.initialize(0.);
-      IntVector cIdx[8];
-      //__________________________________
-      //  
-      for(NodeIterator iter = patch->getNodeIterator(); !iter.done();iter++){
-        patch->findCellsFromNode(*iter,cIdx);
-        for(int in=0;in<8;in++){
-          gvelocity[*iter]     +=  dVdt_CC[cIdx[in]]*delT*.125;
-          gacceleration[*iter] +=  dVdt_CC[cIdx[in]]*.125;
-          dTdt_NC[*iter]       +=  dTdt_CC[cIdx[in]]*.125;
-        }
-      }
-      //__________________________________
-      //  inter-material phase transformation
-      if(d_ice->d_models.size() > 0)  { 
-        constCCVariable<double> modelMass_src, mass_CC;
-        Ghost::GhostType  gac = Ghost::AroundCells;
-        new_dw->get(modelMass_src,Ilb->modelMass_srcLabel,indx,patch, gac,1);
-        new_dw->get(mass_CC,      MIlb->cMassLabel,       indx,patch, gac,1);
-
-        for(NodeIterator iter = patch->getNodeIterator();!iter.done();iter++){
-          patch->findCellsFromNode(*iter,cIdx);
-          for (int in=0;in<8;in++){
-            massBurnFraction[*iter] +=
-                     (fabs(modelMass_src[cIdx[in]])/mass_CC[cIdx[in]])*.125;
-
-          }
-        }
-      }  // if(models >0 )
-    }  // mpmMatls
-  }  //patches
-}
-
-
-/* --------------------------------------------------------------------- 
- Function~  MPMICE::computeEquilibrationPressure-- 
- Reference: Flow of Interpenetrating Material Phases, J. Comp, Phys
-               18, 440-464, 1975, see the equilibration section
-                   
- Steps
- ----------------
-    - Compute rho_micro_CC, SpeedSound, vol_frac for ALL matls
-
-    For each cell
-    _ WHILE LOOP(convergence, max_iterations)
-        - compute the pressure and dp_drho from the EOS of each material.
-        - Compute delta Pressure
-        - Compute delta volume fraction and update the 
-          volume fraction and the celldensity.
-        - Test for convergence of delta pressure and delta volume fraction
-    - END WHILE LOOP
-    - bulletproofing
-    end
- 
-Note:  The nomenclature follows the reference.
-       This is identical to  ICE::computeEquilibrationPressure except
-       we now include EOS for MPM matls.                               
-_____________________________________________________________________*/
-void MPMICE::computeEquilibrationPressure(const ProcessorGroup*,
-                                     const PatchSubset* patches,
-                                     const MaterialSubset*,
-                                     DataWarehouse* old_dw,
-                                     DataWarehouse* new_dw,
-                                     const MaterialSubset* press_matl)
-{
-  timeStep_vartype timeStep;
-  old_dw->get(timeStep, Ilb->timeStepLabel );
-
-  bool isNotInitialTimeStep = (timeStep > 0);
-
-  const Level* level = getLevel(patches);
-  int L_indx = level->getIndex();
-
-  for(int p=0;p<patches->size();p++){
-    const Patch* patch = patches->get(p);
-    printTask(patches,patch,cout_doing,"Doing computeEquilibrationPressure");
-
-    double    converg_coeff = 100.;
-    double    convergence_crit = converg_coeff * DBL_EPSILON;
-    double    c_2;
-    double press_ref= d_ice->getRefPress();
-    unsigned int numICEMatls = m_materialManager->getNumMatls( "ICE" );
-    unsigned int numMPMMatls = m_materialManager->getNumMatls( "MPM" );
-    unsigned int numALLMatls = numICEMatls + numMPMMatls;
-
-    Vector dx       = patch->dCell(); 
-    double cell_vol = dx.x()*dx.y()*dx.z();
-
-    std::vector<double> press_eos(numALLMatls);
-    std::vector<double> dp_drho(numALLMatls),dp_de(numALLMatls);
-    std::vector<double> mat_volume(numALLMatls);
-
-    std::vector<CCVariable<double> > vol_frac(numALLMatls);
-    std::vector<CCVariable<double> > rho_micro(numALLMatls);
-    std::vector<CCVariable<double> > rho_CC_new(numALLMatls);
-    std::vector<CCVariable<double> > speedSound(numALLMatls);
-    std::vector<CCVariable<double> > sp_vol_new(numALLMatls);
-    std::vector<CCVariable<double> > f_theta(numALLMatls);
-    std::vector<CCVariable<double> > kappa(numALLMatls);
-    
-    std::vector<constCCVariable<double> > placeHolder(0);
-    std::vector<constCCVariable<double> > cv(numALLMatls);
-    std::vector<constCCVariable<double> > gamma(numALLMatls);
-    std::vector<constCCVariable<double> > sp_vol_CC(numALLMatls); 
-    std::vector<constCCVariable<double> > Temp(numALLMatls);
-    std::vector<constCCVariable<double> > rho_CC_old(numALLMatls);
-    std::vector<constCCVariable<double> > mass_CC(numALLMatls);
-    std::vector<constCCVariable<Vector> > vel_CC(numALLMatls);
-    
-    constCCVariable<double> press;    
-    CCVariable<double> press_new, delPress_tmp, sumKappa, TMV_CC;
-    CCVariable<double> sum_imp_delP;
-    CCVariable<int>  nIterations;
-    
-    Ghost::GhostType  gn = Ghost::None;
-    //__________________________________
-    old_dw->get( press,                  Ilb->press_CCLabel,       0,patch,gn, 0); 
-    new_dw->allocateAndPut( press_new,   Ilb->press_equil_CCLabel, 0,patch );
-    new_dw->allocateAndPut( TMV_CC,      Ilb->TMV_CCLabel,         0,patch );
-    new_dw->allocateAndPut( sumKappa,    Ilb->sumKappaLabel,       0,patch );
-    new_dw->allocateAndPut( sum_imp_delP,Ilb->sum_imp_delPLabel,   0,patch );
-    new_dw->allocateAndPut( nIterations, Ilb->eq_press_itersLabel, 0,patch );
-    new_dw->allocateTemporary(delPress_tmp, patch); 
-    
-    sum_imp_delP.initialize(0.0);
-    nIterations.initialize(0);
-
-    std::vector<MPMMaterial*> mpm_matl(numALLMatls);
-    std::vector<ICEMaterial*> ice_matl(numALLMatls);
-    for (unsigned int m = 0; m < numALLMatls; m++) {
-      Material* matl = m_materialManager->getMaterial( m );
-      ice_matl[m] = dynamic_cast<ICEMaterial*>(matl);
-      mpm_matl[m] = dynamic_cast<MPMMaterial*>(matl);
-    }
-
-    for (unsigned int m = 0; m < numALLMatls; m++) {
-      Material* matl = m_materialManager->getMaterial( m );
-      int indx = matl->getDWIndex();
-      if(ice_matl[m]){                    // I C E
-        old_dw->get( Temp[m],      Ilb->temp_CCLabel,      indx, patch, gn,0 );
-        old_dw->get( rho_CC_old[m],Ilb->rho_CCLabel,       indx, patch, gn,0 );
-        old_dw->get( sp_vol_CC[m], Ilb->sp_vol_CCLabel,    indx, patch, gn,0 );
-        old_dw->get( vel_CC[m],    Ilb->vel_CCLabel,       indx, patch, gn,0 );
-        new_dw->get( cv[m],        Ilb->specific_heatLabel,indx, patch, gn,0 );
-        new_dw->get( gamma[m],     Ilb->gammaLabel,        indx, patch, gn,0 );
-        new_dw->allocateAndPut(rho_CC_new[m], Ilb->rho_CCLabel,  indx,patch);
-      }
-      if(mpm_matl[m]){                    // M P M
-        new_dw->get( Temp[m],     MIlb->temp_CCLabel, indx, patch, gn,0 );
-        new_dw->get( vel_CC[m],   MIlb->vel_CCLabel,  indx, patch, gn,0 );
-        new_dw->get( sp_vol_CC[m],Ilb->sp_vol_CCLabel,indx, patch, gn,0 ); 
-        new_dw->get( rho_CC_old[m],Ilb->rho_CCLabel,  indx, patch, gn,0 );
-        new_dw->allocateTemporary(rho_CC_new[m],  patch);
-      }
-      new_dw->allocateTemporary(rho_micro[m],  patch);
-      new_dw->allocateAndPut( vol_frac[m],   Ilb->vol_frac_CCLabel,   indx, patch);
-      new_dw->allocateAndPut( f_theta[m],    Ilb->f_theta_CCLabel,    indx, patch);
-      new_dw->allocateAndPut( speedSound[m], Ilb->speedSound_CCLabel, indx, patch);
-      new_dw->allocateAndPut( sp_vol_new[m], Ilb->sp_vol_CCLabel,     indx, patch);
-      new_dw->allocateAndPut( kappa[m],    Ilb->compressibilityLabel, indx, patch);
-    }
-
-    press_new.copyData(press);
-
-    //__________________________________
-    // Compute rho_micro, speedSound, volfrac, rho_CC
-    // see Docs/MPMICE.txt for explaination of why we ONlY
-    // use eos evaulations for rho_micro_mpm
-
-    for (CellIterator iter = patch->getExtraCellIterator();!iter.done();iter++){
-
-      const IntVector& c = *iter;
-      double total_mat_vol = 0.0;
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        if(ice_matl[m]){                // I C E
-         rho_micro[m][c] = 1.0/sp_vol_CC[m][c];
-        } else if(mpm_matl[m]){                //  M P M
-          rho_micro[m][c] =  mpm_matl[m]->getConstitutiveModel()->
-            computeRhoMicroCM(press_new[c],press_ref, mpm_matl[m],Temp[m][c],1.0/sp_vol_CC[m][c]);
-        }
-        mat_volume[m] = ( rho_CC_old[m][c]*cell_vol )/rho_micro[m][c];
-        total_mat_vol += mat_volume[m];
-      }  // numAllMatls loop
-
-      TMV_CC[c] = total_mat_vol;
-
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        vol_frac[m][c]   = mat_volume[m]/total_mat_vol;
-        rho_CC_new[m][c] = vol_frac[m][c]*rho_micro[m][c];
-      }
-    }  // cell iterator
-
-    //______________________________________________________________________
-    // Done with preliminary calcs, now loop over every cell
-    int count, test_max_iter = 0;
-
-    for (CellIterator iter = patch->getExtraCellIterator();!iter.done();iter++){
-      const IntVector& c = *iter;  
-      double delPress = 0.;
-      bool converged  = false;
-      double sum;
-      count           = 0;
-      vector<EqPress_dbg> dbgEqPress;
-
-      while ( count < d_ice->d_max_iter_equilibration && converged == false) {
-        count++;
-        //__________________________________
-        // evaluate press_eos at cell i,j,k
-        for (unsigned int m = 0; m < numALLMatls; m++)  {
-          if(ice_matl[m]){    // ICE
-            ice_matl[m]->getEOS()->computePressEOS( rho_micro[m][c], gamma[m][c],
-                                                   cv[m][c], Temp[m][c],
-                                                   press_eos[m],
-                                                   dp_drho[m], dp_de[m] );
-          } else if(mpm_matl[m]){    // MPM
-            mpm_matl[m]->getConstitutiveModel()->
-              computePressEOSCM( rho_micro[m][c], press_eos[m], press_ref,
-                                dp_drho[m], c_2,mpm_matl[m],Temp[m][c] );
-          }
-        }
-
-        //__________________________________
-        // - compute delPress
-        // - update press_CC     
-        double A = 0., B = 0., C = 0.;
-
-        for (unsigned int m = 0; m < numALLMatls; m++)   {
-          double Q =  press_new[c] - press_eos[m];
-          double inv_y =  (vol_frac[m][c] * vol_frac[m][c])
-                        / (dp_drho[m] * rho_CC_new[m][c] + d_SMALL_NUM);
-                                 
-          A   +=  vol_frac[m][c];
-          B   +=  Q * inv_y;
-          C   +=  inv_y;
-        } 
-        double vol_frac_not_close_packed = 1.;
-        delPress = (A - vol_frac_not_close_packed - B)/C;
-
-        press_new[c] += delPress;
-
-        if(press_new[c] < convergence_crit ){
-          press_new[c] = fabs(delPress);
-        }
-        
-       //__________________________________
-       // backout rho_micro_CC at this new pressure
-       // - compute the updated volume fractions
-       sum = 0;
-       for (unsigned int m = 0; m < numALLMatls; m++) {
-         if(ice_matl[m]){
-           rho_micro[m][c] = 
-             ice_matl[m]->getEOS()->computeRhoMicro(press_new[c],gamma[m][c],
-                                           cv[m][c],Temp[m][c],rho_micro[m][c]);
-         } if(mpm_matl[m]){
-           rho_micro[m][c] =  
-             mpm_matl[m]->getConstitutiveModel()->computeRhoMicroCM(
-                                          press_new[c],press_ref,mpm_matl[m],Temp[m][c],rho_micro[m][c]);
-         }
-         vol_frac[m][c]   = rho_CC_new[m][c]/rho_micro[m][c];
-         sum += vol_frac[m][c];
-       }
-
-       //__________________________________
-       // - Test for convergence 
-       //  If sum of vol_frac_CC ~= 1.0 then converged 
-       if (fabs(sum-vol_frac_not_close_packed) < convergence_crit){
-         converged = true;
-         
-         //__________________________________
-         // Find the speed of sound based on the converged solution
-         //feclearexcept(FE_ALL_EXCEPT);
-         for (unsigned int m = 0; m < numALLMatls; m++)  {
-           if(ice_matl[m]){
-             ice_matl[m]->getEOS()->computePressEOS(rho_micro[m][c],gamma[m][c],
-                                              cv[m][c],Temp[m][c],press_eos[m],
-                                              dp_drho[m],dp_de[m]);
-
-             c_2 = dp_drho[m] + dp_de[m] * 
-                        (press_eos[m]/(rho_micro[m][c]*rho_micro[m][c]));
-           } else if(mpm_matl[m]){
-              mpm_matl[m]->getConstitutiveModel()->
-                   computePressEOSCM(rho_micro[m][c],press_eos[m],press_ref,
-                                     dp_drho[m],c_2,mpm_matl[m],Temp[m][c]);
-           }
-           speedSound[m][c] = sqrt(c_2);         // Isentropic speed of sound
-
-           //____ BB : B U L L E T   P R O O F I N G----
-           // catch inf and nan speed sound values
-           //if (fetestexcept(FE_INVALID) != 0 || c_2 == 0.0) {
-           //  ostringstream warn;
-           //  warn<<"ERROR MPMICE::computeEquilPressure, mat= "<< m << " cell= "
-           //      << c << " sound speed is imaginary.\n";
-           //  warn << "speedSound = " << speedSound[m][c] << " c_2 = " << c_2 
-           //       << " press_eos = " << press_eos[m]
-           //       << " dp_drho = " << dp_drho[m]
-           //       << " dp_de = " << dp_de[m]
-           //       << " rho_micro = " << rho_micro[m][c] << " Temp = " << Temp[m][c] << endl;
-           //  throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-           //}
-         }
-       }
-
-       // Save iteration data for output in case of crash
-       if(ds_EqPress.active()){
-         EqPress_dbg dbg;
-         dbg.delPress     = delPress;
-         dbg.press_new    = press_new[c];
-         dbg.sumVolFrac   = sum;
-         dbg.count        = count;
-
-         for (unsigned int m = 0; m < numALLMatls; m++) {
-           EqPress_dbgMatl dmatl;
-           dmatl.press_eos   = press_eos[m];
-           dmatl.volFrac     = vol_frac[m][c];
-           dmatl.rhoMicro    = rho_micro[m][c];
-           dmatl.rho_CC      = rho_CC_new[m][c];
-           dmatl.temp_CC     = Temp[m][c];
-           dmatl.mat         = m;
-           dbg.matl.push_back(dmatl);
-         }
-         dbgEqPress.push_back(dbg);
-       }
-       
-     }   // end of converged
-
-      delPress_tmp[c] = delPress;
-
-     //__________________________________
-     // If the pressure solution has stalled out 
-     //  then try a binary search.  Keep track ofthe number
-     // of iterations inside of the search.
-     int binaryPressCount = 0;
-     
-     if(count >= d_ice->d_max_iter_equilibration) {
-        //int lev = patch->getLevel()->getIndex();
-        //cout << "WARNING:MPMICE:ComputeEquilibrationPressure "
-        //     << " Cell : " << c << " on level " << lev << " having a difficult time converging. \n"
-        //    << " Now performing a binary pressure search " << endl;
-
-        //int binaryPressCount;
-        binaryPressureSearch( Temp, rho_micro, vol_frac, rho_CC_new,
-                              speedSound,  dp_drho,  dp_de, 
-                              press_eos, press, press_new, press_ref,
-                              cv, gamma, convergence_crit, 
-                              numALLMatls, count, sum, c);
-        binaryPressCount = count;
-     }
-     
-     nIterations[c] = count + binaryPressCount;
-     test_max_iter = std::max(test_max_iter, count);
-
-      //__________________________________
-      //      BULLET PROOFING
-      // ignore BP if time step recompute has already been requested
-      bool rts = new_dw->recomputeTimeStep();
-      
-      string message;
-      bool allTestsPassed = true;
-      if(test_max_iter == d_ice->d_max_iter_equilibration && !rts){
-        allTestsPassed = false;
-        message += "Max. iterations reached ";
-      }
-      
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        ASSERT(( vol_frac[m][c] > 0.0 ) ||( vol_frac[m][c] < 1.0));
-      }
-      
-      if ( fabs(sum - 1.0) > convergence_crit && !rts) {  
-        allTestsPassed = false;
-        message += " sum (volumeFractions) != 1 ";
-      }
-      
-      if ( press_new[c] < 0.0 && !rts) {
-        allTestsPassed = false;
-        message += " Computed pressure is < 0 ";
-      }
-      
-      for (unsigned int m = 0; m < numALLMatls; m++){
-        if ((rho_micro[m][c] < 0.0 || vol_frac[m][c] < 0.0) && !rts) {
-          allTestsPassed = false;
-          message += " rho_micro < 0 || vol_frac < 0";
-        }
-      }
-      if(allTestsPassed != true){  // throw an exception of there's a problem
-        Point pt = patch->getCellPosition(c);
-        
-        ostringstream warn;
-        warn << "\nMPMICE::ComputeEquilibrationPressure: Cell: "<< c << ", position: " << pt << ", L-"<<L_indx <<"\n"
-             << message
-             <<"\nThis usually means that something much deeper has gone wrong with the simulation. "
-             <<"\nCompute equilibration pressure task is rarely the problem. "
-             << "For more debugging information set the environmental variable:  \n"
-             << "   SCI_DEBUG DBG_EqPress:+\n\n";
-             
-        warn << "INPUTS: \n"; 
-        for (unsigned int m = 0; m < numALLMatls; m++){
-          warn<< "\n matl: " << m << "\n"
-               << "   rho_CC:     " << rho_CC_new[m][c] << "\n"
-               << "   Temperature:   "<< Temp[m][c] << "\n";
-        }
-        if(ds_EqPress.active()){
-          warn << "\nDetails on iterations " << endl;
-          vector<EqPress_dbg>::iterator dbg_iter;
-          for( dbg_iter  = dbgEqPress.begin(); dbg_iter != dbgEqPress.end(); dbg_iter++){
-            EqPress_dbg & d = *dbg_iter;
-            warn << "Iteration:   " << d.count
-                 << "  press_new:   " << d.press_new
-                 << "  sumVolFrac:  " << d.sumVolFrac
-                 << "  delPress:    " << d.delPress << "\n";
-            for (unsigned int m = 0; m < numALLMatls; m++){
-              warn << "  matl: " << d.matl[m].mat
-                   << "  press_eos:  " << d.matl[m].press_eos
-                   << "  volFrac:    " << d.matl[m].volFrac
-                   << "  rhoMicro:   " << d.matl[m].rhoMicro
-                   << "  rho_CC:     " << d.matl[m].rho_CC
-                   << "  Temp:       " << d.matl[m].temp_CC << "\n";
-            }
-          }
-        } 
-      }  // all testsPassed
-    }  // end of cell interator
-    if (cout_norm.active())
-      cout_norm<<"max number of iterations in any cell \t"<<test_max_iter<<endl;
-
-    //__________________________________
-    // Now change how rho_CC is defined to 
-    // rho_CC = mass/cell_volume  NOT mass/mat_volume 
-    for (unsigned int m = 0; m < numALLMatls; m++) {
-      if(ice_matl[m]){
-        rho_CC_new[m].copyData(rho_CC_old[m]);
-      }
-    }
-
-    //__________________________________
-    // - update Boundary conditions
-    //   Don't set Lodi bcs, we already compute Press
-    //   in all the extra cells.
-    // - make copy of press for implicit calc.
-    customBC_localVars* BC_localVars = scinew customBC_localVars();
-    preprocess_CustomBCs("EqPress",old_dw, new_dw, Ilb, patch, 999,
-                          d_ice->d_BC_globalVars, BC_localVars);
-    
-    setBC(press_new,   rho_micro, placeHolder,d_ice->d_surroundingMatl_indx,
-          "rho_micro", "Pressure", patch , m_materialManager, 0, new_dw, 
-          d_ice->d_BC_globalVars, BC_localVars, isNotInitialTimeStep);
-    
-    delete_CustomBCs( d_ice->d_BC_globalVars, BC_localVars );
-
-     
-    //__________________________________
-    // compute sp_vol_CC
-    for (unsigned int m = 0; m < numALLMatls; m++)   {  
-      for (CellIterator iter=patch->getExtraCellIterator();!iter.done();iter++){
-        const IntVector& c = *iter;
-        sp_vol_new[m][c] = 1.0/rho_micro[m][c];
-      }
-      
-      Material* matl = m_materialManager->getMaterial( m );
-      int indx = matl->getDWIndex();
-      setSpecificVolBC(sp_vol_new[m], "SpecificVol", false,rho_CC_new[m],vol_frac[m],
-                       patch,m_materialManager, indx);
-    } 
-    //__________________________________
-    //  compute f_theta  
-    for (CellIterator iter=patch->getExtraCellIterator();!iter.done();iter++){
-      const IntVector& c = *iter;
-      sumKappa[c] = 0.0;
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        kappa[m][c] = sp_vol_new[m][c]/(speedSound[m][c]*speedSound[m][c]);
-        sumKappa[c] += vol_frac[m][c]*kappa[m][c];
-      }
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        f_theta[m][c] = vol_frac[m][c]*kappa[m][c]/sumKappa[c];
-      }
-    }
-
-    //____ BB : B U L L E T   P R O O F I N G----
-    //for (unsigned int m = 0; m < numALLMatls; m++) {
-    //  Material* matl = m_materialManager->getMaterial( m );
-    //  int indx = matl->getDWIndex();
-    //  for(CellIterator iter = patch->getCellIterator(); !iter.done(); iter++){
-    //    if (isnan(kappa[m][*iter]) || isinf(kappa[m][*iter])) {
-    //      ostringstream warn;
-    //      warn<<"MPMICE:(L-"<<m<<"):computeEquilibrationPressure, mat "<<indx<<" cell "
-    //             << *iter << " kappa = " << kappa[m][*iter] 
-    //             << " vol_frac = " << vol_frac[m][*iter] 
-    //             << " sp_vol_new = " << sp_vol_new[m][*iter] 
-    //             << " speedSound = " << speedSound[m][*iter] << endl;
-    //      throw InvalidValue(warn.str(), __FILE__, __LINE__);
-    //    }
-    //  }
-    //}
-
-#if 0
-    //__________________________________
-    //  compute f_theta  (alternate)
-    for (CellIterator iter=patch->getExtraCellIterator();!iter.done();iter++){
-      const IntVector& c = *iter;
-      sumKappa[c] = 0.0;
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        if(ice_matl[m]){
-          kappa[m][c] = sp_vol_new[m][c]/(speedSound[m][c]*speedSound[m][c]);
-        }
-        if(mpm_matl[m]){
-          kappa[m][c] = mpm_matl[m]->getConstitutiveModel()->getCompressibility();
-        }
-        sumKappa[c] += vol_frac[m][c]*kappa[m][c];
-      }
-      for (unsigned int m = 0; m < numALLMatls; m++) {
-        f_theta[m][c] = vol_frac[m][c]*kappa[m][c]/sumKappa[c];
-      }
-    }
-#endif
-    
-  }  //patches
-}
-
-/* --------------------------------------------------------------------- 
- Function~  MPMICE::binaryPressureSearch-- 
- Purpose:   When the technique for find the equilibration pressure
-            craps out then try this method.
- Reference:  Se Numerical Methods by Robert W. Hornbeck.
-_____________________________________________________________________*/ 
-void MPMICE::binaryPressureSearch( std::vector<constCCVariable<double> >& Temp,
-                                   std::vector<CCVariable<double> >& rho_micro, 
-                                   std::vector<CCVariable<double> >& vol_frac, 
-                                   std::vector<CCVariable<double> >& rho_CC_new,
-                                   std::vector<CCVariable<double> >& speedSound,
-                                   std::vector<double> & dp_drho, 
-                                   std::vector<double> & dp_de, 
-                                   std::vector<double> & press_eos,
-                                   constCCVariable<double> & press,
-                                   CCVariable<double> & press_new, 
-                                   double press_ref,
-                                   std::vector<constCCVariable<double> > & cv,
-                                   std::vector<constCCVariable<double> > & gamma,
-                                   double convergence_crit,
-                                   unsigned int numALLMatls,
-                                   int & count,
-                                   double & sum,
-                                   IntVector c )
-{
-  // Start over for this cell using a binary search
-//  cout << " cell " << c << " Starting binary pressure search "<< endl;
-  count = 0;
-  bool converged = false;
-  double c_2;
-  double Pleft=0., Pright=0., Ptemp=0., Pm=0.;
-  double rhoMicroR=0., rhoMicroL=0.;
-  std::vector<double> vfR(numALLMatls);
-  std::vector<double> vfL(numALLMatls);
-  Pm = press[c];
-  double residual = 1.0;
-
-  while ( count < d_ice->d_max_iter_equilibration && converged == false) {
-    count++;
-    sum = 0.;
-    for (unsigned int m = 0; m < numALLMatls; m++) {
-      Material* matl = m_materialManager->getMaterial( m );
-      ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
-      MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
-      if(ice_matl){        // ICE
-        rho_micro[m][c] =
-          ice_matl->getEOS()->computeRhoMicro(Pm,gamma[m][c],
-                                            cv[m][c],Temp[m][c],rho_micro[m][c]);
-      }
-      if(mpm_matl){        // MPM
-        rho_micro[m][c] =
-          mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
-                                       Pm,press_ref,mpm_matl,Temp[m][c],rho_micro[m][c]);
-      }
-      vol_frac[m][c] = rho_CC_new[m][c]/rho_micro[m][c];
-      sum += vol_frac[m][c];
-    }  // loop over matls
-
-    residual = 1. - sum;
-
-    if(fabs(residual) <= convergence_crit){
-      converged = true;
-      press_new[c] = Pm;
-      //__________________________________
-      // Find the speed of sound at ijk
-      // needed by eos and the the explicit
-      // del pressure function
-      //feclearexcept(FE_ALL_EXCEPT);
-      for (unsigned int m = 0; m < numALLMatls; m++)  {
-        Material* matl = m_materialManager->getMaterial( m );
-        ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
-        MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
-        if(ice_matl){       // ICE
-          ice_matl->getEOS()->computePressEOS(rho_micro[m][c],gamma[m][c],
-                                              cv[m][c],Temp[m][c],press_eos[m],
-                                              dp_drho[m],dp_de[m]);
-          c_2 = dp_drho[m] + dp_de[m] *
-                     (press_eos[m]/(rho_micro[m][c]*rho_micro[m][c]));
-        }
-        if(mpm_matl){       // MPM
-           mpm_matl->getConstitutiveModel()->
-                computePressEOSCM(rho_micro[m][c],press_eos[m],press_ref,
-                                  dp_drho[m],c_2,mpm_matl,Temp[m][c]);
-        }
-        speedSound[m][c] = sqrt(c_2);     // Isentropic speed of sound
-
-        //____ BB : B U L L E T   P R O O F I N G----
-        // catch inf and nan speed sound values
-        //if (fetestexcept(FE_INVALID) != 0 || c_2 == 0.0) {
-        //  ostringstream warn;
-        //  warn<<"ERROR MPMICE::binaryPressSearch, mat= "<< m << " cell= "
-        //      << c << " sound speed is imaginary.\n";
-        //  warn << "speedSound = " << speedSound[m][c] << " c_2 = " << c_2 
-        //       << " press_eos = " << press_eos[m]
-        //       << " dp_drho = " << dp_drho[m]
-        //       << " dp_de = " << dp_de[m]
-        //       << " rho_micro = " << rho_micro[m][c] << " Temp = " << Temp[m][c] << endl;
-        //  throw ProblemSetupException(warn.str(), __FILE__, __LINE__ );
-        //}
-      }
-    }
-    // Initial guess
-    if(count == 1){
-      Pleft = DBL_EPSILON;
-      Pright=1.0/DBL_EPSILON;
-      Ptemp = .5*(Pleft + Pright);
-    }
-
-    double sumR=0., sumL=0.;
-    for (unsigned int m = 0; m < numALLMatls; m++) {
-      Material* matl = m_materialManager->getMaterial( m );
-      ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
-      MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
-
-      if(ice_matl){        //  ICE
-        rhoMicroR = ice_matl->getEOS()->
-         computeRhoMicro(Pright,gamma[m][c],cv[m][c],Temp[m][c],rho_micro[m][c]);
-        rhoMicroL = ice_matl->getEOS()->
-         computeRhoMicro(Pleft, gamma[m][c],cv[m][c],Temp[m][c],rho_micro[m][c]);
-      }
-      if(mpm_matl){        //  MPM
-        rhoMicroR =
-          mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
-                                       Pright,press_ref,mpm_matl,Temp[m][c],rho_micro[m][c]);
-        rhoMicroL =
-          mpm_matl->getConstitutiveModel()->computeRhoMicroCM(
-                                       Pleft, press_ref,mpm_matl,Temp[m][c],rho_micro[m][c]);
-      }
-      vfR[m] = rho_CC_new[m][c]/rhoMicroR;
-      vfL[m] = rho_CC_new[m][c]/rhoMicroL;
-      sumR += vfR[m];
-      sumL += vfL[m];
-      
-//      cout << "matl: " << m << " vol_frac_L: " << vfL[m] << " vol_frac_R: " << vfR[m] 
-//           << " rho_CC: " << rho_CC_new[m][c] << " rho_micro_L: " << rhoMicroL << " rhoMicroR: " << rhoMicroR << endl;
-    }  // all matls
-
-
-//    cout << "Pm = " << Pm << "\t P_L: " << Pleft << "\t P_R: " << Pright << "\t 1.-sum " << residual << " \t sumR: " << sumR << " \t sumL " << sumL << endl;
-
-    //__________________________________
-    //  come up with a new guess
-    double prod = (1.- sumR)*(1. - sumL);
-    if(prod < 0.){
-      Ptemp = Pleft;
-      Pleft = .5*(Pleft + Pright);
-    }else{
-      Pright = Pleft;
-      Pleft  = Ptemp;
-      Pleft  = 0.5 * (Pleft + Pright);
-    }
-    Pm = .5*(Pleft + Pright);
- //   cout << setprecision(15);
-
-  }   // end of converged
-
-#ifdef D_STRICT
-  if (count >= d_ice->d_max_iter_equilibration) {
-    ostringstream desc;
-    desc << "**ERROR** Binary pressure search failed to converge in cell" << c << endl;
-    throw ConvergenceFailure(desc.str(), d_ice->d_max_iter_equilibration,
-                             fabs(residual), convergence_crit, __FILE__, __LINE__);
-  }
-#else
-  if (count >= d_ice->d_max_iter_equilibration) {
-    cout << "**WARNING** Binary pressure search failed to converge in cell " << c << " after "
-         << d_ice->d_max_iter_equilibration << " iterations.  Final residual is "
-         << fabs(residual) << " and convergence tolerance is " << convergence_crit << endl;
-    cout << "  Continuing with unconverged value of pressure = " << Pm << endl;
-    press_new[c] = Pm;
-    //__________________________________
-    // Find the speed of sound at ijk
-    // needed by eos and the the explicit
-    // del pressure function
-    for (unsigned int m = 0; m < numALLMatls; m++)  {
-      Material* matl = m_materialManager->getMaterial( m );
-      ICEMaterial* ice_matl = dynamic_cast<ICEMaterial*>(matl);
-      MPMMaterial* mpm_matl = dynamic_cast<MPMMaterial*>(matl);
-      if(ice_matl){       // ICE
-        ice_matl->getEOS()->computePressEOS(rho_micro[m][c],gamma[m][c],
-                                            cv[m][c],Temp[m][c],press_eos[m],
-                                            dp_drho[m],dp_de[m]);
-        c_2 = dp_drho[m] + dp_de[m] *
-                     (press_eos[m]/(rho_micro[m][c]*rho_micro[m][c]));
-      }
-      if(mpm_matl){       // MPM
-        mpm_matl->getConstitutiveModel()->
-                computePressEOSCM(rho_micro[m][c],press_eos[m],press_ref,
-                                  dp_drho[m],c_2,mpm_matl,Temp[m][c]);
-      }
-      speedSound[m][c] = sqrt(c_2);     // Isentropic speed of sound
-      cout << "    Material " << m << " vol. frac = " << vol_frac[m][c]
-           << " rho = " << rho_micro[m][c] << " press = " << press_eos[m] 
-           << " dp_drho = " << dp_drho[m] << " c^2 = " << c_2 << endl;
-    }
-  }
-#endif
 }
 
 //______________________________________________________________________
@@ -3005,4 +2952,62 @@ void MPMICE::coarsenVariableNC(const ProcessorGroup*,
       }  // fine patches
     }  // matls
   }  // coarse level
+}
+
+/* _____________________________________________________________________
+MPMICE::scheduleFinalizeTimestep--
+This task called at the very bottom of the timestep,
+after scheduleTimeAdvance and the scheduleCoarsen.
+
+This is scheduled on every level.
+_____________________________________________________________________*/
+void
+MPMICE::scheduleFinalizeTimestep(const LevelP& level, SchedulerP& sched)
+{
+    cout_doing << "----------------------------" << endl;
+    cout_doing << d_myworld->myRank() << " MPMICE::scheduleFinalizeTimestep\t\t\t\tL-" << level->getIndex() << endl;
+
+    const PatchSet* ice_patches = level->eachPatch();
+    const MaterialSet* ice_matls = m_materialManager->allMaterials("ICE");
+    const MaterialSet* all_matls = m_materialManager->allMaterials();
+    const MaterialSet* mpm_matls = m_materialManager->allMaterials("MPM");
+    const MaterialSubset* ice_matls_sub = ice_matls->getUnion();
+
+    d_ice->scheduleConservedtoPrimitive_Vars(sched, ice_patches, ice_matls_sub,
+        ice_matls,
+        "finalizeTimestep");
+
+    d_ice->scheduleTestConservation(sched, ice_patches, ice_matls_sub,
+        all_matls);
+
+    if (d_analysisModules.size() != 0) {
+        vector<AnalysisModule*>::iterator iter;
+        for (iter = d_analysisModules.begin();
+            iter != d_analysisModules.end(); iter++) {
+            AnalysisModule* am = *iter;
+            am->scheduleDoAnalysis_preReloc(sched, level);
+        }
+    }
+
+    // only do on finest level until we get AMR MPM
+    if (level->getIndex() == level->getGrid()->numLevels() - 1)
+        sched->scheduleParticleRelocation(level,
+            Mlb->pXLabel_preReloc,
+            d_mpm->d_particleState_preReloc,
+            Mlb->pXLabel,
+            d_mpm->d_particleState,
+            Mlb->pParticleIDLabel, mpm_matls);
+
+    //__________________________________
+    //  on the fly analysis
+    if (d_analysisModules.size() != 0) {
+        vector<AnalysisModule*>::iterator iter;
+        for (iter = d_analysisModules.begin();
+            iter != d_analysisModules.end(); iter++) {
+            AnalysisModule* am = *iter;
+            am->scheduleDoAnalysis(sched, level);
+        }
+    }
+
+    cout_doing << "---------------------------------------------------------" << endl;
 }

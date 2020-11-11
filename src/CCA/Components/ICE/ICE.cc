@@ -2525,7 +2525,6 @@ void ICE::scheduleUpdateVolumeFraction(SchedulerP& sched,
     }
 }
 
-
 /* _____________________________________________________________________
  Function~  ICE::updateVolumeFraction
  Purpose~   Update the volume fraction to reflect the mass exchange done
@@ -3077,7 +3076,7 @@ void ICE::computePressFC(const ProcessorGroup*,
 
         //__________________________________
         //  For each face compute the pressure
-        computePressFace<SFCXVariable<double> >(patch->getSFCXIterator(),
+        computePressFacecomputePressFace<SFCXVariable<double> >(patch->getSFCXIterator(),
             adj_offset[0], sum_rho_CC, press_CC,
             pressX_FC);
 
@@ -3759,7 +3758,6 @@ void ICE::accumulateEnergySourceSinks(const ProcessorGroup*,
         }  // matl loop
     }  // patch loop
 }
-
 
 /* _____________________________________________________________________
  Function~  ICE:: scheduleComputeLagrangianValues--
@@ -5222,10 +5220,7 @@ void ICE::updateVel_FC(const ProcessorGroup*,
       pOldDW  = old_dw;
     }
  
-    delt_vartype delT;
-    pOldDW->get(delT, lb->delTLabel, level);
-     
-    constCCVariable<double> imp_delP; 
+    delt_vartype delT;   
     new_dw->get(imp_delP, lb->imp_delPLabel, 0,   patch,gac, 1);
  
     for(unsigned int m = 0; m < numMatls; m++) {

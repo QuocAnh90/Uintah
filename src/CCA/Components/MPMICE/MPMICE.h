@@ -120,6 +120,12 @@ public:
                                   const MaterialSubset*,
                                   const MaterialSet*);
 
+    void interpolateNCToCC_0(const ProcessorGroup*,
+                           const PatchSubset* patch,
+                           const MaterialSubset* matls,
+                           DataWarehouse* old_dw,
+                           DataWarehouse* new_dw);
+
   void scheduleCoarsenCC_0(SchedulerP&, 
                            const PatchSet*,
                            const MaterialSet*);
@@ -128,48 +134,49 @@ public:
                              const PatchSet*,
                              const MaterialSet*);
 
-  void scheduleComputeLagrangianValuesMPM(SchedulerP&, 
-                                          const PatchSet*,
-                                          const MaterialSubset*,
-                                          const MaterialSet*);
-
-  void scheduleCoarsenLagrangianValuesMPM(SchedulerP&, 
-                                          const PatchSet*,
-                                          const MaterialSet*);
-
-  void scheduleInterpolateCCToNC(SchedulerP&, const PatchSet*,
-                                 const MaterialSet*);
-
-  void scheduleComputeCCVelAndTempRates(SchedulerP&, const PatchSet*,
-                                        const MaterialSet*);
-
-  void scheduleRefineCC(SchedulerP&, const PatchSet*,
-                        const MaterialSet*);
-
-  void scheduleComputeNonEquilibrationPressure(SchedulerP&, 
-                                               const PatchSet*,
-                                               const MaterialSubset*,
-                                               const MaterialSubset*,
-                                               const MaterialSubset*,
-                                               const MaterialSet*);
-
-  void scheduleComputePressure(SchedulerP&, 
+    void scheduleComputePressure(SchedulerP&, 
                                const PatchSet*,
                                const MaterialSubset*,
                                const MaterialSubset*,
                                const MaterialSubset*,
                                const MaterialSet*);
 
+    void computeEquilibrationPressure(const ProcessorGroup*,
+                                    const PatchSubset* patch,
+                                    const MaterialSubset* matls,
+                                    DataWarehouse*, 
+                                    DataWarehouse*,
+                                    const MaterialSubset* press_matl);
+
+  void binaryPressureSearch(std::vector<constCCVariable<double> >& Temp, 
+                            std::vector<CCVariable<double> >& rho_micro, 
+                            std::vector<CCVariable<double> >& vol_frac, 
+                            std::vector<CCVariable<double> >& rho_CC_new,
+                            std::vector<CCVariable<double> >& speedSound_new,
+                            std::vector<double> & dp_drho, 
+                            std::vector<double> & dp_de, 
+                            std::vector<double> & press_eos,
+                            constCCVariable<double> & press,
+                            CCVariable<double> & press_new, 
+                            double press_ref,
+                            std::vector<constCCVariable<double> > & cv,
+                            std::vector<constCCVariable<double> > & gamma,
+                            double convergence_crit,
+                            unsigned int numALLMatls,
+                            int & count,
+                            double & sum,
+                            IntVector c );   
 
   void scheduleInterpolatePressCCToPressNC(SchedulerP&, 
                                           const PatchSet*,
                                           const MaterialSubset*,
                                           const MaterialSet*);
 
-  void scheduleRefinePressCC(SchedulerP&, 
-                                      const PatchSet*,
-                                      const MaterialSubset*,
-                                      const MaterialSet*);
+  void interpolatePressCCToPressNC(const ProcessorGroup*,
+                                   const PatchSubset* patch,
+                                   const MaterialSubset* matls,
+                                   DataWarehouse* old_dw,
+                                   DataWarehouse* new_dw);
 
   void scheduleInterpolatePAndGradP(SchedulerP&, 
                                     const PatchSet*,
@@ -178,6 +185,45 @@ public:
                                     const MaterialSubset*,
                                     const MaterialSet*);
             
+  void interpolatePAndGradP(const ProcessorGroup*,
+                            const PatchSubset* patch,
+                            const MaterialSubset* matls,
+                            DataWarehouse* old_dw,
+                            DataWarehouse* new_dw);
+
+  void scheduleComputeLagrangianValuesMPM(SchedulerP&, 
+                                          const PatchSet*,
+                                          const MaterialSubset*,
+                                          const MaterialSet*);
+
+  void computeLagrangianValuesMPM(const ProcessorGroup*,
+                                  const PatchSubset* patch,
+                                  const MaterialSubset* matls,
+                                  DataWarehouse* old_dw,
+                                  DataWarehouse* new_dw);
+
+  void scheduleCoarsenLagrangianValuesMPM(SchedulerP&, 
+                                          const PatchSet*,
+                                          const MaterialSet*);
+
+  void scheduleComputeCCVelAndTempRates(SchedulerP&, const PatchSet*,
+                                        const MaterialSet*);
+
+  void computeCCVelAndTempRates(const ProcessorGroup*,
+                                const PatchSubset* patch,
+                                const MaterialSubset* matls,
+                                DataWarehouse* old_dw,
+                                DataWarehouse* new_dw);
+  
+  void scheduleInterpolateCCToNC(SchedulerP&, const PatchSet*,
+                                 const MaterialSet*);
+
+  void interpolateCCToNC(const ProcessorGroup*,
+                         const PatchSubset* patch,
+                         const MaterialSubset* matls,
+                         DataWarehouse* old_dw,
+                         DataWarehouse* new_dw);
+
   void scheduleComputeInternalForce(SchedulerP&, const PatchSet*,
                                     const MaterialSet*);
 
@@ -201,20 +247,7 @@ public:
                                           const MaterialSubset* matls,
                                           DataWarehouse*,
                                           DataWarehouse* new_dw);
-                         
-                                                    
-  void interpolateNCToCC_0(const ProcessorGroup*,
-                           const PatchSubset* patch,
-                           const MaterialSubset* matls,
-                           DataWarehouse* old_dw,
-                           DataWarehouse* new_dw);
-  
-  void computeLagrangianValuesMPM(const ProcessorGroup*,
-                                  const PatchSubset* patch,
-                                  const MaterialSubset* matls,
-                                  DataWarehouse* old_dw,
-                                  DataWarehouse* new_dw);
-
+                                  
   void computeEquilibrationPressure(const ProcessorGroup*,
                                     const PatchSubset* patch,
                                     const MaterialSubset* matls,
@@ -222,37 +255,12 @@ public:
                                     DataWarehouse*,
                                     const MaterialSubset* press_matl);
 
-
-  void interpolateCCToNC(const ProcessorGroup*,
-                         const PatchSubset* patch,
-                         const MaterialSubset* matls,
-                         DataWarehouse* old_dw,
-                         DataWarehouse* new_dw);
-
-  void computeCCVelAndTempRates(const ProcessorGroup*,
-                                const PatchSubset* patch,
-                                const MaterialSubset* matls,
-                                DataWarehouse* old_dw,
-                                DataWarehouse* new_dw);
-
   void interpolateCCToNCRefined(const ProcessorGroup*,
                                 const PatchSubset* patch,
                                 const MaterialSubset* matls,
                                 DataWarehouse* old_dw,
                                 DataWarehouse* new_dw);
-
-  void interpolatePressCCToPressNC(const ProcessorGroup*,
-                                   const PatchSubset* patch,
-                                   const MaterialSubset* matls,
-                                   DataWarehouse* old_dw,
-                                   DataWarehouse* new_dw);
-
-  void interpolatePAndGradP(const ProcessorGroup*,
-                            const PatchSubset* patch,
-                            const MaterialSubset* matls,
-                            DataWarehouse* old_dw,
-                            DataWarehouse* new_dw);
-                            
+                        
   void HEChemistry(const ProcessorGroup*,
                    const PatchSubset* patch,
                    const MaterialSubset* matls,
@@ -272,25 +280,15 @@ public:
                      const std::string&    message2,
                      int     component,
                      const NCVariable<Vector>& q_NC);
-                     
-  void binaryPressureSearch(std::vector<constCCVariable<double> >& Temp, 
-                            std::vector<CCVariable<double> >& rho_micro, 
-                            std::vector<CCVariable<double> >& vol_frac, 
-                            std::vector<CCVariable<double> >& rho_CC_new,
-                            std::vector<CCVariable<double> >& speedSound_new,
-                            std::vector<double> & dp_drho, 
-                            std::vector<double> & dp_de, 
-                            std::vector<double> & press_eos,
-                            constCCVariable<double> & press,
-                            CCVariable<double> & press_new, 
-                            double press_ref,
-                            std::vector<constCCVariable<double> > & cv,
-                            std::vector<constCCVariable<double> > & gamma,
-                            double convergence_crit,
-                            unsigned int numALLMatls,
-                            int & count,
-                            double & sum,
-                            IntVector c );                   
+                        
+  void scheduleRefinePressCC(SchedulerP&,
+                      const PatchSet*,
+                      const MaterialSubset*,
+                      const MaterialSet*);
+
+  void scheduleRefineCC(SchedulerP&, const PatchSet*,
+                        const MaterialSet*);
+
 //__________________________________
 //    R A T E   F O R M                   
   void computeRateFormPressure(const ProcessorGroup*,
