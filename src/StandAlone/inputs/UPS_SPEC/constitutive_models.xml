@@ -1050,8 +1050,16 @@
     <Phi      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <Psi      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <Version  spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
-	
-	
+
+	  <Phi_CS      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+
+	  <strain_rate1      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+
+	  <strain_rate2      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+
+	  <Use_friction      spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+	  
+	  
     <Usetransition     spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <A1                spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <B1                spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
