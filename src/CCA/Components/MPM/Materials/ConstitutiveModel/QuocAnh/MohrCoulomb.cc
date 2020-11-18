@@ -1317,9 +1317,9 @@ if(Use_softening>0)
     }
 }
 
-if (Use_friction > 0)
-
 double mu = 0;
+
+if (Use_friction > 0)
 {
     if (shear_strain_rate_nonlocal > strain_rate1 && shear_strain_rate_nonlocal< strain_rate2)
     {
@@ -1329,7 +1329,7 @@ double mu = 0;
     {
         mu = tan(Phi_CS * 3.1415 / 180);
     }
-    Phi = tanh(mu)
+    Phi = tanh(mu);
 }
 
 if (UseWaterRetention>0)
