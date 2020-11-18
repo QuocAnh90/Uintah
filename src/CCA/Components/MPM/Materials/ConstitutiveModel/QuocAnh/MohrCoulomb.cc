@@ -506,7 +506,7 @@ double rho_orig = matl->getInitialDensity();
     old_dw->get(deformationGradient, lb->pDeformationMeasureLabel, pset);
 	new_dw->get(pvolume_new,		 lb->pVolumeLabel_preReloc,    pset);
 	new_dw->get(pxnew,				 lb->pXLabel_preReloc,		   pset);
-    new_dw->get(pdispnew,            lb->pDispLabel_preReloc,      pset);
+    //new_dw->get(pdispnew,            lb->pDispLabel_preReloc,      pset);
 
 	std::vector<constParticleVariable<double> > ISVs(d_NINSV+1);
     for(int i=0;i<d_NINSV;i++){
