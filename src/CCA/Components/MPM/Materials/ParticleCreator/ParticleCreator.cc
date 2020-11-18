@@ -550,6 +550,7 @@ ParticleCreator::allocateVariables(particleIndex numParticles,
   new_dw->allocateAndPut(pvars.pdisp,         d_lb->pDispLabel,         subset);
   new_dw->allocateAndPut(pvars.psurface,      d_lb->pSurfLabel,         subset);
   new_dw->allocateAndPut(pvars.psurfgrad,     d_lb->pSurfGradLabel,     subset);
+  new_dw->allocateAndPut(pvars.pMu,           d_lb->pMuLabel,           subset);
 
   if(d_flags->d_integrator_type=="explicit"){
     new_dw->allocateAndPut(pvars.pvelGrad,    d_lb->pVelGradLabel,      subset);
@@ -742,6 +743,30 @@ ParticleCreator::initializeParticle(const Patch* patch,
               -2.*pi/nPar1*p.x()/dxcc[0],2.*0.25/nPar2/rtemp*p.y()/dxcc[1],0.,
                                       0.,                               0.,1.);
 */
+
+  pvars.Mu[i] = 0;
+
+  // Maniplate the friction based
+  if (d_flags->d_Modified_base_friction)
+  {
+      double X0 = p.x();
+      double Y0 = p.y();
+      double base_friction = 0;
+      double U = -X0 * sin(80 * 3.1415 / 180) + Y0 * cos(80 * 3.1415 / 180);
+
+      if (U < 0.3126)
+      {
+          base_friction = 0.1706 * pow((U * U * tan(80 * 3.1415 / 180)), -0.336);
+      }
+
+      if (U > 0.3126)
+      {
+          base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)), -0.336);
+      }
+
+      pvars.Mu[i] = base_friction;
+   }
+
 
   pvars.ptemperature[i] = (*obj)->getInitialData_double("temperature");
   pvars.plocalized[i]   = 0;

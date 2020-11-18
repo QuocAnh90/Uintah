@@ -122,6 +122,8 @@ MPMFlags::MPMFlags(const ProcessorGroup* myworld)
   d_autoCycleMin        =  .1;
   d_withGaussSolver     =  false;
 
+  d_Modified_base_friction = false;
+
   // MMS
   if(d_mms_type=="AxisAligned"){
     d_mms_type = "AxisAligned";
@@ -270,6 +272,7 @@ MPMFlags::readMPMFlags(ProblemSpecP& ps, Output* dataArchive)
   mpm_flag_ps->get("auto_cycle_min", d_autoCycleMin);
   mpm_flag_ps->get("with_gauss_solver", d_withGaussSolver);
   
+  mpm_flag_ps->get("Modified_base_friction", d_Modified_base_friction);
   
   d_computeScaleFactor = dataArchive->isLabelSaved("p.scalefactor");
 
@@ -449,6 +452,8 @@ MPMFlags::outputProblemSpec(ProblemSpecP& ps)
   ps->appendElement("boundary_traction_faces", d_bndy_face_txt_list);
   ps->appendElement("do_scalar_diffusion", d_doScalarDiffusion);
   ps->appendElement("d_ndim",                      d_ndim);
+
+  ps->appendElement("Modified_base_friction", d_Modified_base_friction);
 }
 
 bool

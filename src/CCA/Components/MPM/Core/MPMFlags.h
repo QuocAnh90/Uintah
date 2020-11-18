@@ -130,7 +130,9 @@ class Output;
     double      d_autoCycleMin;
     bool        d_withGaussSolver;
     //********** End Reactive Flow Section *********************
-    
+   
+    bool        d_Modified_base_friction;
+
     // flags for turning on/off the reduction variable calculations
     struct reductionVars{
      bool mass;

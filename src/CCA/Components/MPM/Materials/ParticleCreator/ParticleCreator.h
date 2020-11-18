@@ -95,6 +95,7 @@ namespace Uintah {
     ParticleVariable<Vector> pvelocity, pexternalforce;
     ParticleVariable<Matrix3> psize,pvelGrad;
     ParticleVariable<double> pmass, pvolume, ptemperature, psp_vol,perosion;
+    ParticleVariable<double> pMu;
     ParticleVariable<double> pcolor,ptempPrevious,p_q;
     ParticleVariable<double> psurface;
     ParticleVariable<Vector> psurfgrad;

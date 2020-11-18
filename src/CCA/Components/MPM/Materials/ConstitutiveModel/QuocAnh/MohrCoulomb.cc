@@ -264,7 +264,7 @@ using std::cerr; using namespace Uintah;
 MohrCoulomb::MohrCoulomb(ProblemSpecP& ps,MPMFlags* Mflag)
   : ConstitutiveModel(Mflag)
 {
-  d_NBASICINPUTS=52;
+  d_NBASICINPUTS=54;
   d_NMGDC=0;
 
 // Total number of properties
@@ -384,6 +384,9 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
     cm_ps->appendElement("strain_rate1", UI[49]);
     cm_ps->appendElement("strain_rate2", UI[50]);
     cm_ps->appendElement("Phi_CS", UI[51]);
+
+    cm_ps->appendElement("Modified_base_friction", UI[52]);
+    cm_ps->appendElement("base_friction", UI[53]);
 }
 
 MohrCoulomb* MohrCoulomb::clone()
@@ -503,6 +506,7 @@ double rho_orig = matl->getInitialDensity();
     old_dw->get(deformationGradient, lb->pDeformationMeasureLabel, pset);
 	new_dw->get(pvolume_new,		 lb->pVolumeLabel_preReloc,    pset);
 	new_dw->get(pxnew,				 lb->pXLabel_preReloc,		   pset);
+    new_dw->get(pdispnew,            lb->pDispLabel_preReloc,      pset);
 
 	std::vector<constParticleVariable<double> > ISVs(d_NINSV+1);
     for(int i=0;i<d_NINSV;i++){
@@ -601,6 +605,28 @@ double rho_orig = matl->getInitialDensity();
 		  n = n - 1;
 	  }
 	  svarg[38] = n;
+      /*
+      // Maniplate the friction based
+      if (Modified_base_friction > 0)
+      {
+          double X0 = pxnew[idx](1) - pdispnew[idx](1);
+          double Y0 = pxnew[idx](2) - pdispnew[idx](2);
+          double base_friction = 0;
+          double U = -X0 * sin(80 * 3.1415 / 180) + Y0 * cos(80 * 3.1415 / 180);
+
+          if (U < 0.3126)
+          {
+              base_friction = 0.1706 * pow((U * U * tan(80 * 3.1415 / 180)), -0.336);
+          }
+          
+          if (U > 0.3126)
+          {
+              base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)),-0.336);                 
+          }
+
+          base_friction = sigarg[53];
+      }
+      */
 
 	  // Compute Ko
 	  double s_xx = sigarg[0];
@@ -1042,6 +1068,10 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
     ps->getWithDefault("strain_rate1", UI[49], 0.0);
     ps->getWithDefault("strain_rate2", UI[50], 0.0);
     ps->getWithDefault("Phi_CS", UI[51], 0.0);
+
+    ps->getWithDefault("Modified_base_friction", UI[52], 0.0);
+    ps->getWithDefault("base_friction", UI[53], 0.0);
+}
 }
 
 void
@@ -1105,12 +1135,18 @@ MohrCoulomb::initializeLocalMPMLabels()
   ISVNames.push_back("Use_regular");
   ISVNames.push_back("tFE");
   ISVNames.push_back("tShear");
-    ISVNames.push_back("s_xy");
+  ISVNames.push_back("s_xy");
 
-	ISVNames.push_back("n_nonlocalMC");
-	ISVNames.push_back("l_nonlocal");
+  ISVNames.push_back("n_nonlocalMC");
+  ISVNames.push_back("l_nonlocal");
 
-	
+  ISVNames.push_back("Use_friction");
+  ISVNames.push_back("strain_rate1");
+  ISVNames.push_back("strain_rate2");
+  ISVNames.push_back("Phi_CS");
+
+  ISVNames.push_back("Modified_base_friction");
+  ISVNames.push_back("base_friction");
 
   for(int i=0;i<d_NINSV;i++){
     ISVLabels.push_back(VarLabel::create(ISVNames[i],
@@ -1275,15 +1311,18 @@ if(Use_softening>0)
 }
 
 if (Use_friction > 0)
+
+double mu = 0;
 {
     if (shear_strain_rate_nonlocal > strain_rate1 && shear_strain_rate_nonlocal< strain_rate2)
     {
-        Phi = Phi_P - (shear_strain_rate_nonlocal - strain_rate1) * (Phi_P - Phi_CS) / (strain_rate2 - strain_rate1);
+        mu = tan(Phi_P * 3.1415 / 180) - (shear_strain_rate_nonlocal - strain_rate1) * (tan(Phi_P * 3.1415 / 180) - tan(Phi_CS * 3.1415 / 180)) / (strain_rate2 - strain_rate1);
     }
     else if (shear_strain_rate_nonlocal > strain_rate2)
     {
-        Phi = Phi_CS;
+        mu = tan(Phi_CS * 3.1415 / 180);
     }
+    Phi = tanh(mu)
 }
 
 if (UseWaterRetention>0)

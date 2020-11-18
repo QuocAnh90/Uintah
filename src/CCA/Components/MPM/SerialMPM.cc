@@ -871,6 +871,13 @@ void SerialMPM::scheduleInterpolateParticlesToGrid(SchedulerP& sched,
   t->requires(Task::NewDW, lb->pExtForceLabel_preReloc,gan,NGP);
   t->requires(Task::OldDW, lb->pTemperatureLabel,      gan,NGP);
   t->requires(Task::NewDW, lb->pCurSizeLabel,          gan,NGP);
+
+  if (flags->d_Modified_base_friction)
+  {
+      t->requires(Task::OldDW, lb->pMuLabel, gan, NGP);
+      t->computes(lb->gMuLabel);
+  }
+
   if (flags->d_useCBDI) {
     t->requires(Task::NewDW,  lb->pExternalForceCorner1Label,gan,NGP);
     t->requires(Task::NewDW,  lb->pExternalForceCorner2Label,gan,NGP);
@@ -2314,6 +2321,12 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
         }
       }
 
+      if (flags->d_Modified_base_friction) {
+          old_dw->get(pMu, lb->pMuLabel, pset);
+          new_dw->allocateAndPut(gMu, lb->gMuLabel, dwi, patch);
+          gMu.initialize(0);
+      }
+
       new_dw->get(pexternalforce, lb->pExtForceLabel_preReloc, pset);
       constParticleVariable<IntVector> pLoadCurveID;
       if (flags->d_useCBDI) {
@@ -2401,6 +2414,7 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
            interpolator->findCellAndWeights(px[idx],ni,S,psize[idx]);
         Vector pmom = pvelocity[idx]*pmass[idx];
         double ptemp_ext = pTemperature[idx];
+        double Mu = pMu[idx];
         total_mom += pmom;
 
         // Add each particles contribution to the local mass & velocity
@@ -2421,6 +2435,11 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
             gvelocity[node]      += pmom                           * S[k];
             gvolume[node]        += pvolume[idx]                   * S[k];
 //            gColor[node]         += pColor[idx]*pmass[idx]         * S[k];
+
+            if (flags->d_Modified_base_friction) {
+                gMu[node] += pMu[idx] * S[k];
+            }
+
             if (!flags->d_useCBDI) {
               gexternalforce[node] += pexternalforce[idx]          * S[k];
             }
@@ -2498,6 +2517,11 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
 //        gColor[c]         /= gmass[c];
         gTemperatureNoBC[c] = gTemperature[c];
         gSp_vol[c]        /= gmass[c];
+
+        if (flags->d_Modified_base_friction) {
+            gMu[c] /= gmass[c];
+        }
+
       }
 
       if (flags->d_doScalarDiffusion) {

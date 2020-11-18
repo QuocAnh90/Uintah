@@ -151,6 +151,9 @@ MPMLabel::MPMLabel()
   
   pTemperatureLabel = VarLabel::create( "p.temperature",
                         ParticleVariable<double>::getTypeDescription() );
+
+  pMuLabel = VarLabel::create("p.mu",
+      ParticleVariable<double>::getTypeDescription());
   
   // for thermal stress
   pTempPreviousLabel = VarLabel::create( "p.tempPrevious",
@@ -404,6 +407,9 @@ MPMLabel::MPMLabel()
   
   gTemperatureLabel = VarLabel::create("g.temperature",
                         NCVariable<double>::getTypeDescription());
+
+  gMuLabel = VarLabel::create("g.Mu",
+      NCVariable<double>::getTypeDescription());
 
   gTemperatureNoBCLabel = VarLabel::create("g.temperaturenobc",
                         NCVariable<double>::getTypeDescription());
@@ -903,6 +909,7 @@ MPMLabel::~MPMLabel()
   VarLabel::destroy(pXLabel_preReloc);
   VarLabel::destroy(pTemperatureLabel);
   VarLabel::destroy(pTemperatureLabel_preReloc);
+  VarLabel::destroy(pMuLabel);
   VarLabel::destroy(pTempPreviousLabel); // for thermal stress
   VarLabel::destroy(pTempPreviousLabel_preReloc); // for thermal stress
   VarLabel::destroy(pdTdtLabel);

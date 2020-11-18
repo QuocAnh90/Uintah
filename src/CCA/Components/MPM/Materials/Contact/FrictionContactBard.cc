@@ -131,6 +131,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
       new_dw->get(gposition[m],      lb->gPositionLabel, dwi, patch, gnone, 0);
       new_dw->get(gnormtraction[m],  lb->gNormTractionLabel,
                                                          dwi, patch, gnone, 0);
+      new_dw->get(gMu[m],            lb->gMuLabel,       dwi, patch, gnone, 0);
       new_dw->getModifiable(gvelocity[m],   lb->gVelocityLabel,      dwi,patch);
       new_dw->getModifiable(frictionWork[m],lb->frictionalWorkLabel, dwi,patch);
     }  // loop over matls
@@ -234,7 +235,10 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
                   double tangentDeltaVelocity=Dot(deltaVelocity,surfaceTangent);
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
-
+                  if (flags->d_Modified_base_friction) {
+                      double frictionCoefficient =
+                          Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+                  }
                   // Calculate velocity change needed to enforce contact
                   Dv = -normal_normaldV
                     -surfaceTangent*frictionCoefficient*fabs(normalDeltaVel);
@@ -428,6 +432,11 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
 
+                  if (flags->d_Modified_base_friction) {
+                      double frictionCoefficient =
+                          Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+
+                  }
                   // Calculate velocity change needed to enforce contact
                   Dv= -normal_normaldV
                     -surfaceTangent*frictionCoefficient*fabs(normalDeltaVel);
