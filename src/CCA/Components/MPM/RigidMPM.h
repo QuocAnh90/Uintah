@@ -83,6 +83,7 @@ public:
          
   //////////
   // Insert Documentation Here:
+  friend class MPMICE2;
   friend class MPMICE;
   friend class MPMArches;
 
