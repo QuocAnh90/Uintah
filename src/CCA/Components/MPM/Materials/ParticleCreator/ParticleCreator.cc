@@ -1053,8 +1053,8 @@ void ParticleCreator::registerPermanentParticleState(MPMMaterial* matl)
   particle_state.push_back(d_lb->pTemperatureLabel);
   particle_state_preReloc.push_back(d_lb->pTemperatureLabel_preReloc);
 
-  particle_state.push_back(d_lb->pMuLabel);
-  particle_state_preReloc.push_back(d_lb->pMuLabel_preReloc);
+  //particle_state.push_back(d_lb->pMuLabel);
+  //particle_state_preReloc.push_back(d_lb->pMuLabel_preReloc);
 
   // for thermal stress
   particle_state.push_back(d_lb->pTempPreviousLabel);
