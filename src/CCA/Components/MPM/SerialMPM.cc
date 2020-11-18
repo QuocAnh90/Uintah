@@ -1497,6 +1497,9 @@ void SerialMPM::scheduleFinalParticleUpdate(SchedulerP& sched,
 
   t->modifies(lb->pTemperatureLabel_preReloc);
 
+  t->requires(Task::NewDW, lb->pMuLabel, gnone);
+  t->computes(lb->pMuLabel_preReloc);
+
   sched->addTask(t, patches, matls);
 }
 
@@ -4357,14 +4360,21 @@ void SerialMPM::finalParticleUpdate(const ProcessorGroup*,
       new_dw->get(pdTdt,        lb->pdTdtLabel,                      pset);
       new_dw->get(pmassNew,     lb->pMassLabel_preReloc,             pset);
       new_dw->get(pLocalized,   lb->pLocalizedMPMLabel_preReloc,     pset);
-
+      
       new_dw->getModifiable(pTempNew, lb->pTemperatureLabel_preReloc,pset);
+
+      constParticleVariable<double> pMu;
+      ParticleVariable<double> pMunew;
+      new_dw->get(pMu, lb->pMuLabel, pset);
+      new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
 
       // Loop over particles
       for(ParticleSubset::iterator iter = pset->begin();
           iter != pset->end(); iter++){
         particleIndex idx = *iter;
         pTempNew[idx] += pdTdt[idx]*delT;
+
+        pMunew[idx] = pMu[idx];
 
         // Delete particles whose mass is too small (due to combustion),
         // whose pLocalized flag has been set to -999 or who have 
