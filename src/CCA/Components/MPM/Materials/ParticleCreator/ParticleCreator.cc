@@ -744,7 +744,7 @@ ParticleCreator::initializeParticle(const Patch* patch,
                                       0.,                               0.,1.);
 */
 
-  pvars.Mu[i] = 0;
+  pvars.pMu[i] = 0;
 
   // Maniplate the friction based
   if (d_flags->d_Modified_base_friction)
@@ -765,9 +765,8 @@ ParticleCreator::initializeParticle(const Patch* patch,
           base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)), -0.336);
       }
 
-      pvars.Mu[i] = base_friction;
+      pvars.pMu[i] = base_friction;
       */
-      pvars.Mu[i] = 0;
    }
 
 
