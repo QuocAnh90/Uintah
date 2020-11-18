@@ -78,7 +78,7 @@ namespace Uintah {
 
     ****************************************/
 
-    enum MPMType { STAND_MPMICE2 = 0, RIGID_MPMICE};
+    enum MPMType { STAND_MPMICE2 = 0};
 
     class MPMICE2 : public ApplicationCommon {
 
