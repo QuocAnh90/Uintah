@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef UINTAH_HOMEBREW_MPMICE_H
-#define UINTAH_HOMEBREW_MPMICE_H
+#ifndef UINTAH_HOMEBREW_MPMICE2_H
+#define UINTAH_HOMEBREW_MPMICE2_H
 
 #include <CCA/Components/Application/ApplicationCommon.h>
 
