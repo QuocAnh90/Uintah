@@ -2321,6 +2321,8 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
         }
       }
 
+      constParticleVariable<double> pMu;
+      NCVariable<double> gMu;
       if (flags->d_Modified_base_friction) {
           old_dw->get(pMu, lb->pMuLabel, pset);
           new_dw->allocateAndPut(gMu, lb->gMuLabel, dwi, patch);
