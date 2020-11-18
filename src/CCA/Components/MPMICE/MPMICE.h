@@ -247,13 +247,6 @@ public:
                                           const MaterialSubset* matls,
                                           DataWarehouse*,
                                           DataWarehouse* new_dw);
-                                  
-  void computeEquilibrationPressure(const ProcessorGroup*,
-                                    const PatchSubset* patch,
-                                    const MaterialSubset* matls,
-                                    DataWarehouse*, 
-                                    DataWarehouse*,
-                                    const MaterialSubset* press_matl);
 
   void interpolateCCToNCRefined(const ProcessorGroup*,
                                 const PatchSubset* patch,
