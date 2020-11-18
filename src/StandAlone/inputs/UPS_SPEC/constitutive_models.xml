@@ -1089,7 +1089,10 @@
 	
 	<n_nonlocalMC		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 	<l_nonlocal		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
-	
+
+	  <Modified_base_friction		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+	  <base_friction		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+	  
     <UseWaterRetention spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
     <PhiB  spec="OPTIONAL DOUBLE 'positive'" need_applies_to="type MohrCoulomb"/>
     <suction  spec="OPTIONAL DOUBLE 'positive'" need_applies_to="type MohrCoulomb"/>

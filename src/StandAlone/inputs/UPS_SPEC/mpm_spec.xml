@@ -51,7 +51,8 @@
       <InsertParticles                    spec="OPTIONAL BOOLEAN" /> 
       <InsertParticlesFile                spec="OPTIONAL STRING" /> 
       <withColor                          spec="OPTIONAL BOOLEAN" />
-    
+	  <Modified_base_friction             spec="OPTIONAL BOOLEAN" />
+		
       <!-- FIXME:  THE FOLLOW APPLY ONLY TO THE IMPLICIT MPM CODE -->
       <dynamic                            spec="OPTIONAL BOOLEAN" />
       <solver                             spec="OPTIONAL STRING 'petsc, simple'" />
