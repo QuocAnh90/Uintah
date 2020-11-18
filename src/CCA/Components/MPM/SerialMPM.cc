@@ -1383,7 +1383,7 @@ void SerialMPM::scheduleInterpolateToParticlesAndUpdate(SchedulerP& sched,
 
   if (flags->d_Modified_base_friction)
   {
-      t->requires(Task::NewDW, lb->pMuLabel, gnone);
+      t->requires(Task::OldDW, lb->pMuLabel, gnone);
       t->computes(lb->pMuLabel_preReloc);
   }
   //__________________________________
