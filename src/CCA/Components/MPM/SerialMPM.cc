@@ -3891,7 +3891,7 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
       ParticleVariable<double> pMunew;
       if (flags->d_Modified_base_friction)
       {    
-          new_dw->get(pMu, lb->pMuLabel, pset);
+          old_dw->get(pMu, lb->pMuLabel, pset);
           new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
       }
 
