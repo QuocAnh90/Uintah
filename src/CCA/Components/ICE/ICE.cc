@@ -3076,7 +3076,7 @@ void ICE::computePressFC(const ProcessorGroup*,
 
         //__________________________________
         //  For each face compute the pressure
-        computePressFacecomputePressFace<SFCXVariable<double> >(patch->getSFCXIterator(),
+        computePressFace<SFCXVariable<double> >(patch->getSFCXIterator(),
             adj_offset[0], sum_rho_CC, press_CC,
             pressX_FC);
 
@@ -5220,7 +5220,10 @@ void ICE::updateVel_FC(const ProcessorGroup*,
       pOldDW  = old_dw;
     }
  
-    delt_vartype delT;   
+    delt_vartype delT; 
+    pOldDW->get(delT, lb->delTLabel, level);
+
+    constCCVariable<double> imp_delP;
     new_dw->get(imp_delP, lb->imp_delPLabel, 0,   patch,gac, 1);
  
     for(unsigned int m = 0; m < numMatls; m++) {
