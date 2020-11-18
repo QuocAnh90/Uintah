@@ -488,7 +488,7 @@ double rho_orig = matl->getInitialDensity();
     ParticleSubset* pset = old_dw->getParticleSubset(dwi, patch);
     constParticleVariable<Matrix3> deformationGradient, pstress;
     ParticleVariable<Matrix3> pstress_new;
-    ParticleVariable<double> pMunew;
+    
     constParticleVariable<Matrix3> deformationGradient_new, velGrad;
     constParticleVariable<double> pmass, pvolume, ptemperature;
     constParticleVariable<double> pvolume_new;
@@ -515,6 +515,7 @@ double rho_orig = matl->getInitialDensity();
     }
 
     ParticleVariable<double> pdTdt,p_q;
+    ParticleVariable<double> pMunew;
 
     new_dw->allocateAndPut(pstress_new,     lb->pStressLabel_preReloc,   pset);
     new_dw->allocateAndPut(pdTdt,           lb->pdTdtLabel,              pset);
@@ -609,6 +610,9 @@ double rho_orig = matl->getInitialDensity();
 	  }
 	  svarg[38] = n;
       
+      double Modified_base_friction = UI[52];
+      pMunew = 0;
+
       // Maniplate the friction based
       if (Modified_base_friction > 0)
       {
@@ -627,8 +631,8 @@ double rho_orig = matl->getInitialDensity();
               base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)),-0.336);                 
           }
 
-          base_friction = pMunew;
-          base_friction = sigarg[53];
+          pMunew = base_friction;
+          sigarg[53] = base_friction;
       }
       
 
