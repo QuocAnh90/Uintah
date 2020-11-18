@@ -611,7 +611,7 @@ double rho_orig = matl->getInitialDensity();
 	  svarg[38] = n;
       
       double Modified_base_friction = UI[52];
-      pMunew = 0;
+      pMunew[idx] = 0;
 
       // Maniplate the friction based
       if (Modified_base_friction > 0)
@@ -631,7 +631,7 @@ double rho_orig = matl->getInitialDensity();
               base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)),-0.336);                 
           }
 
-          pMunew = base_friction;
+          pMunew[idx] = base_friction;
           sigarg[53] = base_friction;
       }
       
