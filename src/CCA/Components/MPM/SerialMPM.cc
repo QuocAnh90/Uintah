@@ -3887,10 +3887,10 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
         massBurnFrac = massBurnFrac_create;         // reference created data
       }
 
+      constParticleVariable<double> pMu;
+      ParticleVariable<double> pMunew;
       if (flags->d_Modified_base_friction)
-      {
-          constParticleVariable<double> pMu;
-          ParticleVariable<double> pMunew;
+      {    
           new_dw->get(pMu, lb->pMuLabel, pset);
           new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
       }
