@@ -155,7 +155,7 @@ MPMLabel::MPMLabel()
   pMuLabel = VarLabel::create("p.mu",
       ParticleVariable<double>::getTypeDescription());
   
-  pMuLabel_preReloc = VarLabel::create("p.mu",
+  pMuLabel_preReloc = VarLabel::create("p.mu+",
       ParticleVariable<double>::getTypeDescription());
 
 
