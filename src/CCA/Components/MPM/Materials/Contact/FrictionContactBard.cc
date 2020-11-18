@@ -302,6 +302,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
   // vectors of NCVariables
   std::vector<constNCVariable<double> > gmass(numMatls);
   std::vector<constNCVariable<double> > gvolume(numMatls);
+  std::vector<constNCVariable<double> >  gMu(numMatls);
   std::vector<constNCVariable<Point> >  gposition(numMatls);
   std::vector<NCVariable<Vector> >      gvelocity_star(numMatls);
   std::vector<constNCVariable<double> > normtraction(numMatls);
@@ -327,6 +328,11 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
                             dwi, patch);
       new_dw->getModifiable(frictionWork[m], lb->frictionalWorkLabel,
                             dwi, patch);
+
+      if (flag->d_Modified_base_friction)
+      {
+          new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
+      }
     }
 
     delt_vartype delT;
