@@ -2416,7 +2416,6 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
            interpolator->findCellAndWeights(px[idx],ni,S,psize[idx]);
         Vector pmom = pvelocity[idx]*pmass[idx];
         double ptemp_ext = pTemperature[idx];
-        double Mu = pMu[idx];
         total_mom += pmom;
 
         // Add each particles contribution to the local mass & velocity
