@@ -488,11 +488,12 @@ double rho_orig = matl->getInitialDensity();
     ParticleSubset* pset = old_dw->getParticleSubset(dwi, patch);
     constParticleVariable<Matrix3> deformationGradient, pstress;
     ParticleVariable<Matrix3> pstress_new;
+    ParticleVariable<double> pMunew;
     constParticleVariable<Matrix3> deformationGradient_new, velGrad;
     constParticleVariable<double> pmass, pvolume, ptemperature;
     constParticleVariable<double> pvolume_new;
     constParticleVariable<Vector> pvelocity;
-    constParticleVariable<Point> px, pxnew;
+    constParticleVariable<Point> px, pxnew, pdispnew;
     delt_vartype delT;
 
     old_dw->get(delT, lb->delTLabel, getLevel(patches));
@@ -506,7 +507,7 @@ double rho_orig = matl->getInitialDensity();
     old_dw->get(deformationGradient, lb->pDeformationMeasureLabel, pset);
 	new_dw->get(pvolume_new,		 lb->pVolumeLabel_preReloc,    pset);
 	new_dw->get(pxnew,				 lb->pXLabel_preReloc,		   pset);
-    //new_dw->get(pdispnew,            lb->pDispLabel_preReloc,      pset);
+    new_dw->get(pdispnew,            lb->pDispLabel_preReloc,      pset);
 
 	std::vector<constParticleVariable<double> > ISVs(d_NINSV+1);
     for(int i=0;i<d_NINSV;i++){
@@ -521,6 +522,8 @@ double rho_orig = matl->getInitialDensity();
     new_dw->get(deformationGradient_new,
                                  lb->pDeformationMeasureLabel_preReloc,  pset);
     new_dw->get(velGrad,         lb->pVelGradLabel_preReloc,             pset);
+
+    new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
 
 	std::vector<ParticleVariable<double> > ISVs_new(d_NINSV+1);
     for(int i=0;i<d_NINSV;i++){
@@ -605,7 +608,7 @@ double rho_orig = matl->getInitialDensity();
 		  n = n - 1;
 	  }
 	  svarg[38] = n;
-      /*
+      
       // Maniplate the friction based
       if (Modified_base_friction > 0)
       {
@@ -624,9 +627,9 @@ double rho_orig = matl->getInitialDensity();
               base_friction = 0.1706 * pow((0.55416 + 2 * (U - 0.3126 * 0.3126 * tan(80 * 3.1415 / 180)) - (U - 0.3126) * (U - 0.3126) * tan(30 * 3.1415 / 180)),-0.336);                 
           }
 
-          base_friction = sigarg[53];
+          base_friction = pMunew;
       }
-      */
+      
 
 	  // Compute Ko
 	  double s_xx = sigarg[0];
@@ -1071,7 +1074,6 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
 
     ps->getWithDefault("Modified_base_friction", UI[52], 0.0);
     ps->getWithDefault("base_friction", UI[53], 0.0);
-}
 }
 
 void

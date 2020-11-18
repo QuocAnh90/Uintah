@@ -155,6 +155,10 @@ MPMLabel::MPMLabel()
   pMuLabel = VarLabel::create("p.mu",
       ParticleVariable<double>::getTypeDescription());
   
+  pMuLabel_preReloc = VarLabel::create("p.mu",
+      ParticleVariable<double>::getTypeDescription());
+
+
   // for thermal stress
   pTempPreviousLabel = VarLabel::create( "p.tempPrevious",
                         ParticleVariable<double>::getTypeDescription() ); 
@@ -910,6 +914,7 @@ MPMLabel::~MPMLabel()
   VarLabel::destroy(pTemperatureLabel);
   VarLabel::destroy(pTemperatureLabel_preReloc);
   VarLabel::destroy(pMuLabel);
+  VarLabel::destroy(pMuLabel_preReloc);
   VarLabel::destroy(pTempPreviousLabel); // for thermal stress
   VarLabel::destroy(pTempPreviousLabel_preReloc); // for thermal stress
   VarLabel::destroy(pdTdtLabel);

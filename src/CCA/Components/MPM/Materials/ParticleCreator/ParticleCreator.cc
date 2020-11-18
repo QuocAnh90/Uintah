@@ -749,6 +749,7 @@ ParticleCreator::initializeParticle(const Patch* patch,
   // Maniplate the friction based
   if (d_flags->d_Modified_base_friction)
   {
+      /*
       double X0 = p.x();
       double Y0 = p.y();
       double base_friction = 0;
@@ -765,6 +766,8 @@ ParticleCreator::initializeParticle(const Patch* patch,
       }
 
       pvars.Mu[i] = base_friction;
+      */
+      pvars.Mu[i] = 0;
    }
 
 
@@ -1050,6 +1053,9 @@ void ParticleCreator::registerPermanentParticleState(MPMMaterial* matl)
 
   particle_state.push_back(d_lb->pTemperatureLabel);
   particle_state_preReloc.push_back(d_lb->pTemperatureLabel_preReloc);
+
+  particle_state.push_back(d_lb->pMuLabel);
+  particle_state_preReloc.push_back(d_lb->pMuLabel_preReloc);
 
   // for thermal stress
   particle_state.push_back(d_lb->pTempPreviousLabel);
