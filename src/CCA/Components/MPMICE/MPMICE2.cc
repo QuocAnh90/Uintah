@@ -83,7 +83,7 @@ static DebugStream ds_EqPress("DBG_EqPress",false);
 
 MPMICE2::MPMICE2(const ProcessorGroup* myworld,
                const MaterialManagerP materialManager,
-               MPMType mpmtype, const bool doAMR)
+               MPMType2 mpmtype, const bool doAMR)
   : ApplicationCommon(myworld, materialManager)
 {
   MIlb = scinew MPMICELabel();

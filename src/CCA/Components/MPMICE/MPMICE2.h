@@ -78,14 +78,14 @@ namespace Uintah {
 
     ****************************************/
 
-    // enum MPMType { STAND_MPMICE2 = 0, RIGID_MPMICE, SHELL_MPMICE, FRACTURE_MPMICE };
+    enum MPMType2 { STAND_MPMICE2 = 0, RIGID_MPMICE, SHELL_MPMICE, FRACTURE_MPMICE };
 
     class MPMICE2 : public ApplicationCommon {
 
     public:
         MPMICE2(const ProcessorGroup* myworld,
             const MaterialManagerP materialManager,
-            MPMType type, const bool doAMR = false);
+            MPMType2 type, const bool doAMR = false);
 
         virtual ~MPMICE2();
 
