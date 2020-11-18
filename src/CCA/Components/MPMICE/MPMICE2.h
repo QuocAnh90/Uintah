@@ -411,7 +411,7 @@ namespace Uintah {
         int              d_8or27;
         int              NGN;
         bool             d_testForNegTemps_mpm;
-        bool             do_mlmpmice;
+        bool             do_mlmpmice2;
 
         int              pbx_matl_num;
         MaterialSubset* pbx_matl;

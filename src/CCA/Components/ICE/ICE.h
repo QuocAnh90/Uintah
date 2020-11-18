@@ -741,6 +741,7 @@ using namespace ExchangeModels;
       const VarLabel* hypre_solver_label;
 #endif
       friend class MPMICE;
+      friend class MPMICE2;
       friend class AMRICE;
       friend class impAMRICE;
 
