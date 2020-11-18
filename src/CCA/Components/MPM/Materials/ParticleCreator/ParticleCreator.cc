@@ -773,7 +773,7 @@ ParticleCreator::initializeParticle(const Patch* patch,
       pvars.pMu[i] = 0;
    }
 
-  cerr << pvars.pMu[i] << endl;
+  //cerr << pvars.pMu[i] << endl;
 
   pvars.ptemperature[i] = (*obj)->getInitialData_double("temperature");
   pvars.plocalized[i]   = 0;
