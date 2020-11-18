@@ -53,13 +53,13 @@ namespace Uintah {
     /**************************************
 
     CLASS
-       MPMICE
+       MPMICE2
 
        Short description...
 
     GENERAL INFORMATION
 
-       MPMICE.h
+       MPMICE2.h
 
        Steven G. Parker
        Department of Computer Science
@@ -69,7 +69,7 @@ namespace Uintah {
 
 
     KEYWORDS
-       MPMICE
+       MPMICE2
 
     DESCRIPTION
        Long description...
@@ -78,16 +78,16 @@ namespace Uintah {
 
     ****************************************/
 
-    enum MPMType { STAND_MPMICE = 0, RIGID_MPMICE, SHELL_MPMICE, FRACTURE_MPMICE };
+    enum MPMType { STAND_MPMICE2 = 0, RIGID_MPMICE, SHELL_MPMICE, FRACTURE_MPMICE };
 
-    class MPMICE : public ApplicationCommon {
+    class MPMICE2 : public ApplicationCommon {
 
     public:
-        MPMICE(const ProcessorGroup* myworld,
+        MPMICE2(const ProcessorGroup* myworld,
             const MaterialManagerP materialManager,
             MPMType type, const bool doAMR = false);
 
-        virtual ~MPMICE();
+        virtual ~MPMICE2();
 
         virtual double recomputeDelT(const double delT);
 
@@ -397,8 +397,8 @@ namespace Uintah {
         };
 
     protected:
-        MPMICE(const MPMICE&);
-        MPMICE& operator=(const MPMICE&);
+        MPMICE2(const MPMICE2&);
+        MPMICE2& operator=(const MPMICE2&);
 
         MPMLabel* Mlb;
         ICELabel* Ilb;
