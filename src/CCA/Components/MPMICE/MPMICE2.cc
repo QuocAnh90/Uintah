@@ -92,15 +92,15 @@ MPMICE2::MPMICE2(const ProcessorGroup* myworld,
   d_testForNegTemps_mpm = true;
 
   switch(mpmtype) {
-      /*
-  case RIGID_MPMICE:
+      
+  case RIGID_MPMICE2:
     d_mpm = scinew RigidMPM(myworld, m_materialManager);
     d_rigidMPM = true;
     break;
-  case SHELL_MPMICE:
+  case SHELL_MPMICE2:
     d_mpm = scinew ShellMPM(myworld, m_materialManager);
     break;
-    */
+    
   default:
     d_mpm = scinew SerialMPM(myworld, m_materialManager);
   }
