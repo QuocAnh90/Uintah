@@ -1381,6 +1381,11 @@ void SerialMPM::scheduleInterpolateToParticlesAndUpdate(SchedulerP& sched,
     }
   }
 
+  if (flags->d_Modified_base_friction)
+  {
+      t->requires(Task::NewDW, lb->pMuLabel, gnone);
+      t->computes(lb->pMuLabel_preReloc);
+  }
   //__________________________________
   //  reduction variables
   if(flags->d_reductionVars->momentum){
@@ -1496,10 +1501,6 @@ void SerialMPM::scheduleFinalParticleUpdate(SchedulerP& sched,
   t->requires(Task::NewDW, lb->pMassLabel_preReloc,             gnone);
 
   t->modifies(lb->pTemperatureLabel_preReloc);
-
-  t->requires(Task::NewDW, lb->pMuLabel, gnone);
-  t->computes(lb->pMuLabel_preReloc);
-
   sched->addTask(t, patches, matls);
 }
 
@@ -3886,6 +3887,14 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
         massBurnFrac = massBurnFrac_create;         // reference created data
       }
 
+      if (flags->d_Modified_base_friction)
+      {
+          constParticleVariable<double> pMu;
+          ParticleVariable<double> pMunew;
+          new_dw->get(pMu, lb->pMuLabel, pset);
+          new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
+      }
+
       double Cp=mpm_matl->getSpecificHeat();
 
       // Diffusion related - JBH
@@ -4029,6 +4038,8 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
           pTempPreNew[idx] = pTemperature[idx]; // for thermal stress
           pmassNew[idx]    = Max(pmass[idx]*(1.    - burnFraction),0.);
           psizeNew[idx]    = (pmassNew[idx]/pmass[idx])*psize[idx];
+
+          pMunew[idx] = pMu[idx];
 
           if (flags->d_doScalarDiffusion) {
             for (int k = 0; k < NN; ++k) {
@@ -4359,23 +4370,14 @@ void SerialMPM::finalParticleUpdate(const ProcessorGroup*,
 
       new_dw->get(pdTdt,        lb->pdTdtLabel,                      pset);
       new_dw->get(pmassNew,     lb->pMassLabel_preReloc,             pset);
-      new_dw->get(pLocalized,   lb->pLocalizedMPMLabel_preReloc,     pset);
-      
+      new_dw->get(pLocalized,   lb->pLocalizedMPMLabel_preReloc,     pset);    
       new_dw->getModifiable(pTempNew, lb->pTemperatureLabel_preReloc,pset);
-
-      constParticleVariable<double> pMu;
-      ParticleVariable<double> pMunew;
-      new_dw->get(pMu, lb->pMuLabel, pset);
-      new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
 
       // Loop over particles
       for(ParticleSubset::iterator iter = pset->begin();
           iter != pset->end(); iter++){
         particleIndex idx = *iter;
         pTempNew[idx] += pdTdt[idx]*delT;
-
-        pMunew[idx] = pMu[idx];
-
         // Delete particles whose mass is too small (due to combustion),
         // whose pLocalized flag has been set to -999 or who have 
         // a negative temperature
