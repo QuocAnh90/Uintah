@@ -550,7 +550,10 @@ ParticleCreator::allocateVariables(particleIndex numParticles,
   new_dw->allocateAndPut(pvars.pdisp,         d_lb->pDispLabel,         subset);
   new_dw->allocateAndPut(pvars.psurface,      d_lb->pSurfLabel,         subset);
   new_dw->allocateAndPut(pvars.psurfgrad,     d_lb->pSurfGradLabel,     subset);
+
+  if (d_flags->d_Modified_base_friction) {
   new_dw->allocateAndPut(pvars.pMu,           d_lb->pMuLabel,           subset);
+  }
 
   if(d_flags->d_integrator_type=="explicit"){
     new_dw->allocateAndPut(pvars.pvelGrad,    d_lb->pVelGradLabel,      subset);
@@ -744,7 +747,7 @@ ParticleCreator::initializeParticle(const Patch* patch,
                                       0.,                               0.,1.);
 */
 
-  pvars.pMu[i] = 0;
+  //pvars.pMu[i] = 0;
 
   // Maniplate the friction based
   if (d_flags->d_Modified_base_friction)
@@ -767,8 +770,10 @@ ParticleCreator::initializeParticle(const Patch* patch,
 
       pvars.pMu[i] = base_friction;
       */
+      pvars.pMu[i] = 0;
    }
 
+  cerr << pvars.pMu[i] << endl;
 
   pvars.ptemperature[i] = (*obj)->getInitialData_double("temperature");
   pvars.plocalized[i]   = 0;

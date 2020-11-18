@@ -524,7 +524,7 @@ double rho_orig = matl->getInitialDensity();
                                  lb->pDeformationMeasureLabel_preReloc,  pset);
     new_dw->get(velGrad,         lb->pVelGradLabel_preReloc,             pset);
 
-    new_dw->allocateAndPut(pMunew, lb->pMuLabel, pset);
+    new_dw->getModifiable(pMunew, lb->pMuLabel, pset);
 
 	std::vector<ParticleVariable<double> > ISVs_new(d_NINSV+1);
     for(int i=0;i<d_NINSV;i++){
