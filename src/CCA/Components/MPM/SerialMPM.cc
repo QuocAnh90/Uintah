@@ -4039,7 +4039,10 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
           pmassNew[idx]    = Max(pmass[idx]*(1.    - burnFraction),0.);
           psizeNew[idx]    = (pmassNew[idx]/pmass[idx])*psize[idx];
 
-          pMunew[idx] = pMu[idx];
+          if (flags->d_Modified_base_friction)
+          {
+              pMunew[idx] = pMu[idx];
+          }
 
           if (flags->d_doScalarDiffusion) {
             for (int k = 0; k < NN; ++k) {
