@@ -613,8 +613,6 @@ double rho_orig = matl->getInitialDensity();
       double Modified_base_friction = UI[52];
       pMunew[idx] = 0;
 
-      cerr << "test" << endl;
-
       // Maniplate the friction based
       if (Modified_base_friction > 0)
       {
@@ -635,8 +633,6 @@ double rho_orig = matl->getInitialDensity();
 
           pMunew[idx] = base_friction;
           sigarg[53] = base_friction;
-
-          cerr << pMunew[idx] << endl;
       }
       
 
