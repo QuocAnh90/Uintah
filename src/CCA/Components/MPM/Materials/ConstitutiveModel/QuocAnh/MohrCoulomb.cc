@@ -492,8 +492,8 @@ double rho_orig = matl->getInitialDensity();
     constParticleVariable<Matrix3> deformationGradient_new, velGrad;
     constParticleVariable<double> pmass, pvolume, ptemperature;
     constParticleVariable<double> pvolume_new;
-    constParticleVariable<Vector> pvelocity;
-    constParticleVariable<Point> px, pxnew, pdispnew;
+    constParticleVariable<Vector> pvelocity, pdispnew;
+    constParticleVariable<Point> px, pxnew ;
     delt_vartype delT;
 
     old_dw->get(delT, lb->delTLabel, getLevel(patches));
@@ -614,6 +614,7 @@ double rho_orig = matl->getInitialDensity();
       pMunew[idx] = 0;
 
       cerr << "test" << endl;
+
       // Maniplate the friction based
       if (Modified_base_friction > 0)
       {
