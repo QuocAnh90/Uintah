@@ -634,7 +634,7 @@ double rho_orig = matl->getInitialDensity();
           pMunew[idx] = base_friction;
           sigarg[53] = base_friction;
 
-          cerr << base_friction << endl;
+          cerr << pMunew[idx] << endl;
       }
       
 
