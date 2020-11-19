@@ -618,7 +618,7 @@ double rho_orig = matl->getInitialDensity();
       {
           double X0 = pxnew[idx](1) - pdispnew[idx].x();
           double Y0 = pxnew[idx](2) - pdispnew[idx].y();
-          double base_friction = 0;
+          double base_friction = 0.89;
           double U = -X0 * sin(80 * 3.1415 / 180) + Y0 * cos(80 * 3.1415 / 180);
 
           if (U < 0.3126)
