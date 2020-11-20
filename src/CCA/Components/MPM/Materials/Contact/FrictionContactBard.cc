@@ -135,7 +135,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
       new_dw->get(gnormtraction[m],  lb->gNormTractionLabel,
                                                          dwi, patch, gnone, 0);
 
-      if (flag->d_Modified_friction)
+      if (d_Modified_friction>0)
       {
           new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
       }
