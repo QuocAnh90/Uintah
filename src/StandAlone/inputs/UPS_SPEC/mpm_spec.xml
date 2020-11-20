@@ -149,6 +149,7 @@
         <filename                        spec="OPTIONAL STRING" />
         <master_material                 spec="OPTIONAL INTEGER" />
         <normal_only                     spec="OPTIONAL BOOLEAN" />
+		<Modified_friction               spec="OPTIONAL DOUBLE 'positive'" />
       </contact>
       
       <material                          spec="MULTIPLE NO_DATA"

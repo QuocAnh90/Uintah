@@ -89,6 +89,8 @@ WARNING
          int NGP;
          int NGN;
 
+         double d_Modified_friction;
+
       public:
          // Constructor
          FrictionContactBard(const ProcessorGroup* myworld,

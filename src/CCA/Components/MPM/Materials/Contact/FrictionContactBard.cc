@@ -61,6 +61,7 @@ FrictionContactBard::FrictionContactBard(const ProcessorGroup* myworld,
   ps->get("volume_constraint",d_vol_const);
   ps->get("separation_factor",d_sepFac);
   ps->get("OneOrTwoStep",     d_oneOrTwoStep);
+  ps->get("Modified_friction", d_Modified_friction);
 
   d_materialManager = d_sS;
 
@@ -86,6 +87,7 @@ void FrictionContactBard::outputProblemSpec(ProblemSpecP& ps)
   contact_ps->appendElement("volume_constraint", d_vol_const);
   contact_ps->appendElement("separation_factor", d_sepFac);
   contact_ps->appendElement("OneOrTwoStep",      d_oneOrTwoStep);
+  contact_ps->appendElement("Modified_friction", d_Modified_friction);
   d_matls.outputProblemSpec(contact_ps);
 }
 
@@ -133,7 +135,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
       new_dw->get(gnormtraction[m],  lb->gNormTractionLabel,
                                                          dwi, patch, gnone, 0);
 
-      if (flag->d_Modified_base_friction)
+      if (flag->d_Modified_friction)
       {
           new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
       }
@@ -241,7 +243,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
                   double tangentDeltaVelocity=Dot(deltaVelocity,surfaceTangent);
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
-                  if (flag->d_Modified_base_friction && gMu[n][c] > 0) {
+                  if (flag->d_Modified_friction && gMu[n][c] > 0) {
                       double frictionCoefficient =
                           Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
                   }
@@ -329,7 +331,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
       new_dw->getModifiable(frictionWork[m], lb->frictionalWorkLabel,
                             dwi, patch);
 
-      if (flag->d_Modified_base_friction)
+      if (flag->d_Modified_friction)
       {
           new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
       }
@@ -444,7 +446,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
 
-                  if (flag->d_Modified_base_friction && gMu[n][c] > 0) {
+                  if (flag->d_Modified_friction && gMu[n][c] > 0) {
                       double frictionCoefficient =
                           Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
 
