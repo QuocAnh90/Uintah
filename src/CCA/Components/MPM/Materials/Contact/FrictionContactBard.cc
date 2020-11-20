@@ -331,7 +331,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
       new_dw->getModifiable(frictionWork[m], lb->frictionalWorkLabel,
                             dwi, patch);
 
-      if (flag->d_Modified_friction)
+      if (d_Modified_friction>0)
       {
           new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
       }
