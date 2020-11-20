@@ -90,6 +90,7 @@ WARNING
          int NGN;
 
          double d_Modified_friction;
+         double d_beta;
 
       public:
          // Constructor

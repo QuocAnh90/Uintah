@@ -62,6 +62,7 @@ FrictionContactBard::FrictionContactBard(const ProcessorGroup* myworld,
   ps->get("separation_factor",d_sepFac);
   ps->get("OneOrTwoStep",     d_oneOrTwoStep);
   ps->get("Modified_friction", d_Modified_friction);
+  ps->get("beta", d_beta);
 
   d_materialManager = d_sS;
 
@@ -88,6 +89,7 @@ void FrictionContactBard::outputProblemSpec(ProblemSpecP& ps)
   contact_ps->appendElement("separation_factor", d_sepFac);
   contact_ps->appendElement("OneOrTwoStep",      d_oneOrTwoStep);
   contact_ps->appendElement("Modified_friction", d_Modified_friction);
+  contact_ps->appendElement("beta", d_beta);
   d_matls.outputProblemSpec(contact_ps);
 }
 
@@ -245,7 +247,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
                   if (d_Modified_friction > 0 && gMu[n][c] > 0) {
                       double frictionCoefficient =
-                          Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+                          Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
                   }
                   // Calculate velocity change needed to enforce contact
                   Dv = -normal_normaldV
@@ -448,7 +450,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
 
                   if (d_Modified_friction > 0 && gMu[n][c] > 0) {
                       double frictionCoefficient =
-                          Min(d_mu, gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+                          Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
 
                   }
                   // Calculate velocity change needed to enforce contact

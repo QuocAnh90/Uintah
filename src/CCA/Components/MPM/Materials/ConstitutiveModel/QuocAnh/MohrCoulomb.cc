@@ -264,7 +264,7 @@ using std::cerr; using namespace Uintah;
 MohrCoulomb::MohrCoulomb(ProblemSpecP& ps,MPMFlags* Mflag)
   : ConstitutiveModel(Mflag)
 {
-  d_NBASICINPUTS=54;
+  d_NBASICINPUTS=55;
   d_NMGDC=0;
 
 // Total number of properties
@@ -387,6 +387,9 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
 
     cm_ps->appendElement("Modified_base_friction", UI[52]);
     cm_ps->appendElement("base_friction", UI[53]);
+
+    cm_ps->appendElement("critical_density", UI[54]);
+    cm_ps->appendElement("no_collision", UI[55]);
 }
 
 MohrCoulomb* MohrCoulomb::clone()
@@ -637,8 +640,6 @@ double rho_orig = matl->getInitialDensity();
           }
           pMunew[idx] = base_friction;
           sigarg[53] = base_friction;
-
-          //cerr << pMunew[idx] << endl;
       }
       
 
@@ -773,87 +774,21 @@ double rho_orig = matl->getInitialDensity();
       // ROTATE pstress_new: S=R*tensorSig*R^T
       pstress_new[idx] = (tensorR*tensorSig)*(tensorR.Transpose());
 
-	  /*
-	// Non local stress
-	  double n_nonlocal = UI[46];
-	  double l_nonlocal = UI[47];
+      // Stress-free
+      double no_collision = UI[55];
+      if(no_collision>0)
+      {
+          double density = pmass[idx] / pvolume_new[idx];
+          double critical_density = UI[54];
 
-	  double domain_nonlocal = l_nonlocal * l_nonlocal;
-	  double Up0 = 0;
-	  double Up1 = 0;
-	  double Up2 = 0;
-	  double Up3 = 0;
-	  double Up4 = 0;
-	  double Up5 = 0;
-	  double Down = 0;
-	  //double Uptest = 0;
-
-	  double weight = 0;
-	  double rx = 0;
-	  double ry = 0;
-	  double rz = 0;
-	  double r2 = 0;
-
-	  double s11 = pstress_new[idx](0,0);
-	  double s22 = pstress_new[idx](1,1);
-	  double s33 = pstress_new[idx](2,2);
-	  double s12 = pstress_new[idx](0,1);
-	  double s23 = pstress_new[idx](1,2);
-	  double s13 = pstress_new[idx](2,0);
-
-	  for (ParticleSubset::iterator iter1 = pset->begin();
-		  iter1 != pset->end(); iter1++) {
-		  particleIndex idx1 = *iter1;
-
-		  rx = pxnew[idx1].x() - pxnew[idx].x();
-		  ry = pxnew[idx1].y() - pxnew[idx].y();
-		  rz = pxnew[idx1].z() - pxnew[idx].z();
-
-		  r2 = rx * rx + ry * ry + rz * rz;
-
-		  if (r2 <= (9*domain_nonlocal)) {
-
-			  weight = sqrt(r2)*exp(-r2/domain_nonlocal)/domain_nonlocal;
-		  }
-		  Up0 += s11 * weight*pvolume_new[idx1];
-		  Up1 += s22 * weight*pvolume_new[idx1];
-		  Up2 += s33 * weight*pvolume_new[idx1];
-		  Up3 += s12 * weight*pvolume_new[idx1];
-		  Up4 += s23 * weight*pvolume_new[idx1];
-		  Up5 += s13 * weight*pvolume_new[idx1];
-		  Down += (weight*pvolume_new[idx1]);
-
-		 //Uptest += idx1 * weight*pvolume_new[idx1];
-
-		 //cerr << weight << ' ' << r2 << ' ' << domain_nonlocal << endl;
-
-	  }
-
-	  double Snonlocal[6];
-	  Snonlocal[0] = (1 - n_nonlocal)*s11 + (n_nonlocal*Up0/Down);
-	  Snonlocal[1] = (1 - n_nonlocal)*s22 + (n_nonlocal*Up1/Down);
-	  Snonlocal[2] = (1 - n_nonlocal)*s33 + (n_nonlocal*Up2/Down);
-	  Snonlocal[3] = (1 - n_nonlocal)*s12 + (n_nonlocal*Up3/Down);
-	  Snonlocal[4] = (1 - n_nonlocal)*s23 + (n_nonlocal*Up4/Down);
-	  Snonlocal[5] = (1 - n_nonlocal)*s13 + (n_nonlocal*Up5/Down);
-
-	  //double test;
-      //test = (1 - n_nonlocal) * idx + (n_nonlocal * Uptest / Down);
-
-      //cerr << n_nonlocal << ' ' << Uptest << ' ' << Down << endl;
-	  //cerr << test << ' ' << idx <<endl;
-
-	  pstress_new[idx](0,0) = Snonlocal[0];
-	  pstress_new[idx](1,2) = Snonlocal[1];
-	  pstress_new[idx](2,2) = Snonlocal[2];
-	  pstress_new[idx](0,1) = Snonlocal[3];
-	  pstress_new[idx](1,0) = Snonlocal[3];
-	  pstress_new[idx](1,2) = Snonlocal[4];
-	  pstress_new[idx](2,1) = Snonlocal[4];
-	  pstress_new[idx](2,0) = Snonlocal[5];
-	  pstress_new[idx](0,2) = Snonlocal[5];
-	  */
-
+              if (density < critical_density)
+              {
+                  pstress_new[idx] = Matrix3( 0, 0, 0,
+                                              0, 0, 0,
+                                              0, 0, 0);               
+              }
+      }
+      
       c_dil = sqrt(USM/rho_cur);
 
       // Compute the strain energy for all the particles
@@ -1085,6 +1020,9 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
 
     ps->getWithDefault("Modified_base_friction", UI[52], 0.0);
     ps->getWithDefault("base_friction", UI[53], 0.0);
+
+    ps->getWithDefault("critical_density", UI[54], 0.0);
+    ps->getWithDefault("no_collision", UI[55], 0.0);
 }
 
 void
@@ -1160,6 +1098,9 @@ MohrCoulomb::initializeLocalMPMLabels()
 
   ISVNames.push_back("Modified_base_friction");
   ISVNames.push_back("base_friction");
+
+  ISVNames.push_back("critical_density");
+  ISVNames.push_back("no_collision");
 
   for(int i=0;i<d_NINSV;i++){
     ISVLabels.push_back(VarLabel::create(ISVNames[i],
