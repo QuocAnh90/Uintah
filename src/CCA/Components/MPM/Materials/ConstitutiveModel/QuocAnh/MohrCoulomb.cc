@@ -381,8 +381,8 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
 	cm_ps->appendElement("l_nonlocal", UI[47]);
 
     cm_ps->appendElement("Use_friction", UI[48]);
-    cm_ps->appendElement("strain_rate1", UI[49]);
-    cm_ps->appendElement("strain_rate2", UI[50]);
+    cm_ps->appendElement("strain1", UI[49]);
+    cm_ps->appendElement("strain2", UI[50]);
     cm_ps->appendElement("Phi_CS", UI[51]);
 
     cm_ps->appendElement("Modified_base_friction", UI[52]);
@@ -1079,8 +1079,8 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
 	ps->getWithDefault("l_nonlocal", UI[47], 0.0);
 
     ps->getWithDefault("Use_friction", UI[48], 0.0);
-    ps->getWithDefault("strain_rate1", UI[49], 0.0);
-    ps->getWithDefault("strain_rate2", UI[50], 0.0);
+    ps->getWithDefault("strain1", UI[49], 0.0);
+    ps->getWithDefault("strain2", UI[50], 0.0);
     ps->getWithDefault("Phi_CS", UI[51], 0.0);
 
     ps->getWithDefault("Modified_base_friction", UI[52], 0.0);
@@ -1154,8 +1154,8 @@ MohrCoulomb::initializeLocalMPMLabels()
   ISVNames.push_back("l_nonlocal");
 
   ISVNames.push_back("Use_friction");
-  ISVNames.push_back("strain_rate1");
-  ISVNames.push_back("strain_rate2");
+  ISVNames.push_back("strain1");
+  ISVNames.push_back("strain2");
   ISVNames.push_back("Phi_CS");
 
   ISVNames.push_back("Modified_base_friction");
@@ -1249,8 +1249,8 @@ int Flavour=int(UI[5]);
     double y=svarg[37];
 
     double Use_friction = UI[48];
-    double strain_rate1 = UI[49];
-    double strain_rate2 = UI[50];
+    double strain1 = UI[49];
+    double strain2 = UI[50];
     double Phi_CS = UI[51];
     double Phi_P = UI[3];
 
@@ -1327,11 +1327,11 @@ double mu = 0;
 
 if (Use_friction > 0)
 {
-    if (shear_strain_rate_nonlocal > strain_rate1 && shear_strain_rate_nonlocal< strain_rate2)
+    if (shear_strain_nonlocal > strain1 && shear_strain_nonlocal < strain2)
     {
-        mu = tan(Phi_P * 3.1415 / 180) - (shear_strain_rate_nonlocal - strain_rate1) * (tan(Phi_P * 3.1415 / 180) - tan(Phi_CS * 3.1415 / 180)) / (strain_rate2 - strain_rate1);
+        mu = tan(Phi_P * 3.1415 / 180) - (shear_strain_nonlocal - strain1) * (tan(Phi_P * 3.1415 / 180) - tan(Phi_CS * 3.1415 / 180)) / (strain2 - strain1);
     }
-    else if (shear_strain_rate_nonlocal > strain_rate2)
+    else if (shear_strain_nonlocal > strain2)
     {
         mu = tan(Phi_CS * 3.1415 / 180);
     }
