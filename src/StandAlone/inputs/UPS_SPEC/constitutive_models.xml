@@ -1093,7 +1093,7 @@
 	  <Modified_base_friction		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 	  <base_friction		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 
-	  <no_collsion		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
+	  <no_collision		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 	  <critical_density		   spec="OPTIONAL DOUBLE" need_applies_to="type MohrCoulomb"/>
 	  
 	  
