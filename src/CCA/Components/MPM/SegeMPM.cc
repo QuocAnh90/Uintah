@@ -872,6 +872,12 @@ void SerialMPM::scheduleInterpolateParticlesToGrid(SchedulerP& sched,
   t->requires(Task::OldDW, lb->pTemperatureLabel,      gan,NGP);
   t->requires(Task::NewDW, lb->pCurSizeLabel,          gan,NGP);
 
+  if (flags->d_Modified_base_friction)
+  {
+      t->requires(Task::OldDW, lb->pMuLabel, gan, NGP);
+      t->computes(lb->gMuLabel);
+  }
+
   if (flags->d_useCBDI) {
     t->requires(Task::NewDW,  lb->pExternalForceCorner1Label,gan,NGP);
     t->requires(Task::NewDW,  lb->pExternalForceCorner2Label,gan,NGP);
@@ -1375,6 +1381,11 @@ void SerialMPM::scheduleInterpolateToParticlesAndUpdate(SchedulerP& sched,
     }
   }
 
+  if (flags->d_Modified_base_friction)
+  {
+      t->requires(Task::OldDW, lb->pMuLabel, gnone);
+      t->computes(lb->pMuLabel_preReloc);
+  }
   //__________________________________
   //  reduction variables
   if(flags->d_reductionVars->momentum){
@@ -2314,6 +2325,14 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
         }
       }
 
+      constParticleVariable<double> pMu;
+      NCVariable<double> gMu;
+      if (flags->d_Modified_base_friction) {
+          old_dw->get(pMu, lb->pMuLabel, pset);
+          new_dw->allocateAndPut(gMu, lb->gMuLabel, dwi, patch);
+          gMu.initialize(0);
+      }
+
       new_dw->get(pexternalforce, lb->pExtForceLabel_preReloc, pset);
       constParticleVariable<IntVector> pLoadCurveID;
       if (flags->d_useCBDI) {
@@ -2422,6 +2441,10 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
             gvolume[node]        += pvolume[idx]                   * S[k];
 //            gColor[node]         += pColor[idx]*pmass[idx]         * S[k];
 
+            if (flags->d_Modified_base_friction) {
+                gMu[node] += pMu[idx] * S[k];
+            }
+
             if (!flags->d_useCBDI) {
               gexternalforce[node] += pexternalforce[idx]          * S[k];
             }
@@ -2499,6 +2522,10 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
 //        gColor[c]         /= gmass[c];
         gTemperatureNoBC[c] = gTemperature[c];
         gSp_vol[c]        /= gmass[c];
+
+        if (flags->d_Modified_base_friction) {
+            gMu[c] /= gmass[c];
+        }
 
       }
 
@@ -3860,6 +3887,14 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
         massBurnFrac = massBurnFrac_create;         // reference created data
       }
 
+      constParticleVariable<double> pMu;
+      ParticleVariable<double> pMunew;
+      if (flags->d_Modified_base_friction)
+      {    
+          old_dw->get(pMu, lb->pMuLabel, pset);
+          new_dw->allocateAndPut(pMunew, lb->pMuLabel_preReloc, pset);
+      }
+
       double Cp=mpm_matl->getSpecificHeat();
 
       // Diffusion related - JBH
@@ -4003,6 +4038,11 @@ void SerialMPM::interpolateToParticlesAndUpdate(const ProcessorGroup*,
           pTempPreNew[idx] = pTemperature[idx]; // for thermal stress
           pmassNew[idx]    = Max(pmass[idx]*(1.    - burnFraction),0.);
           psizeNew[idx]    = (pmassNew[idx]/pmass[idx])*psize[idx];
+
+          if (flags->d_Modified_base_friction)
+          {
+              pMunew[idx] = pMu[idx];
+          }
 
           if (flags->d_doScalarDiffusion) {
             for (int k = 0; k < NN; ++k) {

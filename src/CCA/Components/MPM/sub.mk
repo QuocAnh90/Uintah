@@ -38,6 +38,7 @@ SRCS += $(SRCDIR)/SerialMPM.cc    \
 	$(SRCDIR)/ImpMPM.cc       \
 	$(SRCDIR)/ShellMPM.cc     \
 	$(SRCDIR)/SingleFieldMPM.cc     \
+	$(SRCDIR)/SegeMPM.cc     \
 	$(SRCDIR)/AMRMPM.cc       
 
 PSELIBS := \

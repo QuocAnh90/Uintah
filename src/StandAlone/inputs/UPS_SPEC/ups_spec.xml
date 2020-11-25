@@ -400,7 +400,7 @@
                                     attribute1="type REQUIRED STRING
                                                 'arches,
                                                 burger,dosweep, ice,
-                                                impm, mpm,
+                                                impm, mpm,segempm
                                                 mpmarches, sfmpm, 
                                                 mpmf, mpmice, amrmpm, wasatch, postProcessUda,
                                                 electrostatic_solver,
