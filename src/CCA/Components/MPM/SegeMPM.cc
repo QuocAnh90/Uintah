@@ -137,45 +137,46 @@ SegeMPM::~SegeMPM()
 }
 
 void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
-                             const ProblemSpecP& restart_prob_spec,
-                             GridP& grid)
+    const ProblemSpecP& restart_prob_spec,
+    GridP& grid)
 {
-  cout_doing<<"Doing SegeMPM::problemSetup\t\t\t\t\t MPM"<<endl;
+    cout_doing << "Doing SegeMPM::problemSetup\t\t\t\t\t MPM" << endl;
 
-  d_mpm->setComponents(this);
-  dynamic_cast<ApplicationCommon*>(d_mpm)->problemSetup(prob_spec);
+    d_mpm->setComponents(this);
+    dynamic_cast<ApplicationCommon*>(d_mpm)->problemSetup(prob_spec);
 
-  d_mpm->problemSetup(prob_spec, restart_prob_spec, grid);
+    d_mpm->problemSetup(prob_spec, restart_prob_spec, grid);
 
-  d_8or27 = flags->d_8or27;
-  if (d_8or27 == 8) {
-      NGN = 1;
-  }
-  else {
-      NGN = 2;
-  }
-
-  d_mpm->setParticleGhostLayer(Ghost::AroundNodes, NGP);
-
-  //__________________________________
-  //  create analysis modules
-  // call problemSetup
-  if(!flags->d_with_ice && !flags->d_with_arches){ // mpmice or mpmarches handles this
-      d_analysisModules = AnalysisModuleFactory::create(d_myworld,
-                                                      m_materialManager,
-                                                      prob_spec);
-
-    if(d_analysisModules.size() != 0){
-      vector<AnalysisModule*>::iterator iter;
-      for( iter  = d_analysisModules.begin();
-           iter != d_analysisModules.end(); iter++) {
-        AnalysisModule* am = *iter;
-        am->setComponents( dynamic_cast<ApplicationInterface*>( this ) );
-        am->problemSetup(prob_spec,restart_prob_spec, grid,
-            d_mpm->d_particleState, d_mpm->d_particleState_preReloc);
-      }
+    d_8or27 = flags->d_8or27;
+    if (d_8or27 == 8) {
+        NGN = 1;
     }
-  }
+    else {
+        NGN = 2;
+    }
+
+    d_mpm->setParticleGhostLayer(Ghost::AroundNodes, NGP);
+
+    //__________________________________
+    //  create analysis modules
+    // call problemSetup
+    if (!flags->d_with_ice && !flags->d_with_arches) { // mpmice or mpmarches handles this
+        d_analysisModules = AnalysisModuleFactory::create(d_myworld,
+            m_materialManager,
+            prob_spec);
+
+        if (d_analysisModules.size() != 0) {
+            vector<AnalysisModule*>::iterator iter;
+            for (iter = d_analysisModules.begin();
+                iter != d_analysisModules.end(); iter++) {
+                AnalysisModule* am = *iter;
+                am->setComponents(dynamic_cast<ApplicationInterface*>(this));
+                am->problemSetup(prob_spec, restart_prob_spec, grid,
+                    d_mpm->d_particleState, d_mpm->d_particleState_preReloc);
+            }
+        }
+    }
+}
 
 //______________________________________________________________________
 //
