@@ -129,10 +129,10 @@ SegeMPM::~SegeMPM()
 
   MPMPhysicalBCFactory::clean();
 
-  if(d_analysisModules.size() != 0){
+  if(d_mpm->d_analysisModules.size() != 0){
     vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
+    for( iter  = d_mpm->d_analysisModules.begin();
+         iter != d_mpm->d_analysisModules.end(); iter++){
       AnalysisModule* am = *iter;
       am->releaseComponents();
       delete am;
