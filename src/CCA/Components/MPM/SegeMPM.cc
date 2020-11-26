@@ -108,7 +108,7 @@ SegeMPM::SegeMPM( const ProcessorGroup* myworld,
                       const MaterialManagerP materialManager) :
   MPMCommon( myworld, materialManager )
 {
-
+  flags = scinew MPMFlags(myworld);
   d_mpm = scinew SerialMPM(myworld, m_materialManager);
   Mlb = d_mpm->lb;
 
@@ -121,8 +121,9 @@ SegeMPM::SegeMPM( const ProcessorGroup* myworld,
 SegeMPM::~SegeMPM()
 {
   delete d_mpm;
+  delete flags;
 
-  if (d_mpm->flags->d_doScalarDiffusion) {
+  if (flags->d_doScalarDiffusion) {
     delete d_sdInterfaceModel;
   }
 
@@ -154,7 +155,7 @@ void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
 
   d_mpm->problemSetup(prob_spec, restart_prob_spec, grid);
 
-  d_8or27 = d_mpm->flags->d_8or27;
+  d_8or27 = flags->d_8or27;
   if (d_8or27 == 8) {
       NGN = 1;
   }
@@ -167,7 +168,7 @@ void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
   //__________________________________
   //  create analysis modules
   // call problemSetup
-  if(!d_mpm->flags->d_with_ice && !d_mpm->flags->d_with_arches){ // mpmice or mpmarches handles this
+  if(!flags->d_with_ice && !flags->d_with_arches){ // mpmice or mpmarches handles this
       d_mpm->d_analysisModules = AnalysisModuleFactory::create(d_myworld,
                                                       m_materialManager,
                                                       prob_spec);
@@ -202,7 +203,7 @@ void SegeMPM::outputProblemSpec(ProblemSpecP& root_ps)
 
   //__________________________________
   //  output data analysis modules. Mpmice or mpmarches handles this
-  if(!d_mpm->flags->d_with_ice && !d_mpm->flags->d_with_arches && d_analysisModules.size() != 0){
+  if(!flags->d_with_ice && !flags->d_with_arches && d_mpm->d_analysisModules.size() != 0){
 
     vector<AnalysisModule*>::iterator iter;
     for( iter  = d_analysisModules.begin();
@@ -245,7 +246,6 @@ void SegeMPM::scheduleTotalParticleCount(SchedulerP& sched,
                                            const PatchSet* patches,
                                            const MaterialSet* matls)
 {
-    printSchedule(level, cout_doing, "SegeMPM::scheduleTotalParticleCount");
     d_mpm->scheduleTotalParticleCount(level, sched);
 }
 //__________________________________
@@ -256,7 +256,6 @@ void SegeMPM::scheduleInitializePressureBCs(const LevelP& level,
 {
     printSchedule(level, cout_doing, "SegeMPM::scheduleInitializePressureBCs");
     d_mpm->scheduleInitializePressureBCs(level, sched);
-}
 }
 
 void SegeMPM::scheduleDeleteGeometryObjects(const LevelP& level,
@@ -277,7 +276,7 @@ void
 SegeMPM::scheduleTimeAdvance(const LevelP & level,
                                SchedulerP   & sched)
 {
-  if (!d_mpm->flags->doMPMOnLevel(level->getIndex(), level->getGrid()->numLevels()))
+  if (!flags->doMPMOnLevel(level->getIndex(), level->getGrid()->numLevels()))
     return;
 
   const PatchSet* patches = level->eachPatch();
@@ -290,22 +289,22 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
 
   d_mpm->scheduleComputeCurrentParticleSize(     sched, patches, matls);
   d_mpm->scheduleApplyExternalLoads(             sched, patches, matls);
-  if(d_mpm->flags->d_doScalarDiffusion) {
+  if(flags->d_doScalarDiffusion) {
       d_mpm->d_fluxBC->scheduleApplyExternalScalarFlux(sched, patches, matls);
   }
   d_mpm->scheduleInterpolateParticlesToGrid(     sched, patches, matls);
-  if(d_mpm->flags->d_computeNormals){
+  if(flags->d_computeNormals){
       d_mpm->scheduleComputeNormals(               sched, patches, matls);
   }
-  if(d_mpm->flags->d_useLogisticRegression){
+  if(flags->d_useLogisticRegression){
       d_mpm->scheduleFindSurfaceParticles(         sched, patches, matls);
       d_mpm->scheduleComputeLogisticRegression(    sched, patches, matls);
   }
   d_mpm->scheduleExMomInterpolated(              sched, patches, matls);
-  if(d_mpm->flags->d_doScalarDiffusion) {
+  if(flags->d_doScalarDiffusion) {
       d_mpm->scheduleConcInterpolated(             sched, patches, matls);
   }
-  if(d_mpm->flags->d_useCohesiveZones){
+  if(flags->d_useCohesiveZones){
       d_mpm->scheduleUpdateCohesiveZones(          sched, patches, mpm_matls_sub,
                                                           cz_matls_sub,
                                                           all_matls);
@@ -317,26 +316,26 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
       d_mpm->scheduleComputeContactArea(           sched, patches, matls);
   }
   d_mpm->scheduleComputeInternalForce(           sched, patches, matls);
-  if (d_mpm->flags->d_doScalarDiffusion) {
+  if (flags->d_doScalarDiffusion) {
       d_mpm->scheduleComputeFlux(                  sched, patches, matls);
       d_mpm->scheduleComputeDivergence(            sched, patches, matls);
       d_mpm->scheduleDiffusionInterfaceDiv(        sched, patches, matls);
   }
 
   d_mpm->scheduleComputeAndIntegrateAcceleration(sched, patches, matls);
-  if (d_mpm->flags->d_doScalarDiffusion) {
+  if (flags->d_doScalarDiffusion) {
       d_mpm->scheduleComputeAndIntegrateDiffusion( sched, patches, matls);
   }
   d_mpm->scheduleExMomIntegrated(                sched, patches, matls);
   d_mpm->scheduleSetGridBoundaryConditions(      sched, patches, matls);
-  if (d_mpm->flags->d_prescribeDeformation){
+  if (flags->d_prescribeDeformation){
       d_mpm->scheduleSetPrescribedMotion(          sched, patches, matls);
   }
-  if(d_mpm->flags->d_XPIC2){
+  if(flags->d_XPIC2){
       d_mpm->scheduleComputeSSPlusVp(              sched, patches, matls);
       d_mpm->scheduleComputeSPlusSSPlusVp(         sched, patches, matls);
   }
-  if(d_mpm->flags->d_doExplicitHeatConduction){
+  if(flags->d_doExplicitHeatConduction){
       d_mpm->scheduleComputeHeatExchange(          sched, patches, matls);
       d_mpm->scheduleComputeInternalHeatRate(      sched, patches, matls);
       d_mpm->scheduleComputeNodalHeatFlux(         sched, patches, matls);
@@ -348,10 +347,10 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
   d_mpm->scheduleComputeStressTensor(            sched, patches, matls);
   d_mpm->scheduleFinalParticleUpdate(            sched, patches, matls);
   d_mpm->scheduleInsertParticles(                    sched, patches, matls);
-  if(d_mpm->flags->d_computeScaleFactor){
+  if(flags->d_computeScaleFactor){
       d_mpm->scheduleComputeParticleScaleFactor(       sched, patches, matls);
   }
-  if(d_mpm->flags->d_refineParticles){
+  if(flags->d_refineParticles){
       d_mpm->scheduleAddParticles(                     sched, patches, matls);
   }
 
@@ -370,7 +369,7 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
                                     d_particleState,
       Mlb->pParticleIDLabel, matls, 1);
 
- if(d_mpm->flags->d_useCohesiveZones){
+ if(flags->d_useCohesiveZones){
   sched->scheduleParticleRelocation(level, Mlb->pXLabel_preReloc,
                                     d_cohesiveZoneState_preReloc,
       Mlb->pXLabel,

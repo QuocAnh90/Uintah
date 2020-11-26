@@ -127,6 +127,9 @@ WARNING
   friend class MPM;
   friend class MPMICE2;
   friend class MPMArches;
+
+  MPMFlags* flags;
+
   SerialMPM* d_mpm;
   MPMLabel* Mlb;
 
