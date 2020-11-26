@@ -342,7 +342,7 @@ void MohrCoulomb::outputProblemSpec(ProblemSpecP& ps,bool output_cm_tag)
   cm_ps->appendElement("A1",UI[15]);	// water influence parameter
   cm_ps->appendElement("B1",UI[16]);	// water influence parameter
   cm_ps->appendElement("W",UI[17]);	// water content
-  cm_ps->appendElement("beta",UI[18]);	// strain rate influence parameter
+  cm_ps->appendElement("beta_rate",UI[18]);	// strain rate influence parameter
   cm_ps->appendElement("strain_ref",UI[19]); // shear strain rate reference
   cm_ps->appendElement("shear_strain_rate",UI[20]); // shear strain rate
   cm_ps->appendElement("Usemodul",UI[21]); // modul with strain rate
@@ -974,7 +974,7 @@ MohrCoulomb::getInputParameters(ProblemSpecP& ps)
   ps->getWithDefault("A1",UI[15],0.0); 	// water influence parameter
   ps->getWithDefault("B1",UI[16],0.0); 	// water influence parameter
   ps->getWithDefault("W",UI[17],0.0); 	// water content
-  ps->getWithDefault("beta",UI[18],0.0); 	// strain rate influence parameter
+  ps->getWithDefault("beta_rate",UI[18],0.0); 	// strain rate influence parameter
   ps->getWithDefault("strain_ref",UI[19],0.0); 	// strain rate influence parameter
   ps->getWithDefault("shear_strain_rate",UI[20],0.0); 	// strain rate influence parameter
   ps->getWithDefault("Usemodul",UI[21],0.0);
@@ -1050,7 +1050,7 @@ MohrCoulomb::initializeLocalMPMLabels()
   ISVNames.push_back("A1");
   ISVNames.push_back("B1");
   ISVNames.push_back("W");
-  ISVNames.push_back("beta");
+  ISVNames.push_back("beta_rate");
   ISVNames.push_back("strain_ref");
   ISVNames.push_back("shear_strain_rate");
   ISVNames.push_back("Usemodul");
@@ -1177,7 +1177,7 @@ int Flavour=int(UI[5]);
 	double a1=UI[15];
 	double b1=UI[16];
 	double W=UI[17];
-	double beta=UI[18];
+	double beta_rate=UI[18];
 	double strain_ref=UI[19];
     
     double Use_softening=UI[34];
@@ -1235,7 +1235,7 @@ double Usetransition=UI[14];
 if (Usetransition>0)
 {
 	if(shear_strain_rate_nonlocal >strain_ref){
-	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta);
+	    c=St*a1*pow(W,-b1)*pow(shear_strain_rate_nonlocal /strain_ref,beta_rate);
 	}
 	    else{
 	    c=St*a1*pow(W,-b1);
