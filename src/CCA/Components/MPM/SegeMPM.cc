@@ -395,18 +395,18 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
     }
   }
 
-  sched->scheduleParticleRelocation(level, lb->pXLabel_preReloc,
+  sched->scheduleParticleRelocation(level, flags->lb->pXLabel_preReloc,
                                     d_particleState_preReloc,
-                                    lb->pXLabel,
+      flags->lb->pXLabel,
                                     d_particleState,
-                                    lb->pParticleIDLabel, matls, 1);
+      flags->lb->pParticleIDLabel, matls, 1);
 
  if(d_mpm->flags->d_useCohesiveZones){
-  sched->scheduleParticleRelocation(level, lb->pXLabel_preReloc,
+  sched->scheduleParticleRelocation(level, flags->lb->pXLabel_preReloc,
                                     d_cohesiveZoneState_preReloc,
-                                    lb->pXLabel,
+      flags->lb->pXLabel,
                                     d_cohesiveZoneState,
-                                    lb->czIDLabel, cz_matls,2);
+      flags->lb->czIDLabel, cz_matls,2);
   }
 
   //__________________________________

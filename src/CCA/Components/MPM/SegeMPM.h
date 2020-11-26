@@ -84,10 +84,10 @@ WARNING
 ****************************************/
 
   class SegeMPM : public MPMCommon {
-public:
+   public:
     SegeMPM(const ProcessorGroup* myworld,
               const MaterialManagerP materialManager);
-  virtual ~SegeMPM();
+    virtual ~SegeMPM();
 
   //////////
   // Insert Documentation Here:
@@ -120,13 +120,14 @@ public:
   // Insert Documentation Here:
   virtual void scheduleTimeAdvance(const LevelP& level, SchedulerP&);
 
-protected:
+   protected:
   //////////
   // Insert Documentation Here:
   friend class MPMICE;
   friend class MPM;
   friend class MPMICE2;
   friend class MPMArches;
+  SerialMPM* d_mpm;
 
   void scheduleInitializePressureBCs(const LevelP& level, SchedulerP&);
 
@@ -144,7 +145,7 @@ protected:
   int              NGP;      // Number of ghost particles needed.
   int              NGN;      // Number of ghost nodes     needed.
   
-private:
+   private:
 
   SegeMPM(const SegeMPM&);
   SegeMPM& operator=(const SegeMPM&);
