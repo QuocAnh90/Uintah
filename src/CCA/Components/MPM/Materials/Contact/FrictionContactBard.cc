@@ -113,11 +113,6 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
    std::vector<NCVariable<Vector> >       gvelocity(numMatls);
    std::vector<NCVariable<double> >       frictionWork(numMatls);
 
-   if (d_Modified_friction > 0)
-   {
-       std::vector<constNCVariable<double> >  gMu(numMatls);
-   }
-
    Ghost::GhostType  gnone = Ghost::None;
 
    for(int p=0;p<patches->size();p++){
@@ -143,6 +138,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
 
       if (d_Modified_friction>0)
       {
+
           new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
       }
 
@@ -313,10 +309,7 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
   // vectors of NCVariables
   std::vector<constNCVariable<double> > gmass(numMatls);
   std::vector<constNCVariable<double> > gvolume(numMatls);
-  if (d_Modified_friction > 0)
-  {
-      std::vector<constNCVariable<double> >  gMu(numMatls);
-  }
+  std::vector<constNCVariable<double> >  gMu(numMatls);
   std::vector<constNCVariable<Point> >  gposition(numMatls);
   std::vector<NCVariable<Vector> >      gvelocity_star(numMatls);
   std::vector<constNCVariable<double> > normtraction(numMatls);

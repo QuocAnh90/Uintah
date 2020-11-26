@@ -880,8 +880,8 @@ void SerialMPM::scheduleInterpolateParticlesToGrid(SchedulerP& sched,
     if (flags->d_Modified_base_friction)
     {
         t->requires(Task::OldDW, lb->pMuLabel, gan, NGP);
-        t->computes(lb->gMuLabel);
     }
+    t->computes(lb->gMuLabel);
 
     if (flags->d_useCBDI) {
         t->requires(Task::NewDW, lb->pExternalForceCorner1Label, gan, NGP);
@@ -2337,9 +2337,11 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
             NCVariable<double> gMu;
             if (flags->d_Modified_base_friction) {
                 old_dw->get(pMu, lb->pMuLabel, pset);
+            }
+
                 new_dw->allocateAndPut(gMu, lb->gMuLabel, dwi, patch);
                 gMu.initialize(0);
-            }
+            
 
             new_dw->get(pexternalforce, lb->pExtForceLabel_preReloc, pset);
             constParticleVariable<IntVector> pLoadCurveID;
