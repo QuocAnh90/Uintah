@@ -163,6 +163,7 @@ protected:
   friend class MPMICE;
   friend class MPMICE2;
   friend class MPMArches;
+  friend class SegeMPM;
 
   MaterialSubset* d_one_matl;         // matlsubset for zone of influence
 
