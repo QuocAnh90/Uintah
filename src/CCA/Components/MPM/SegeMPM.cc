@@ -350,9 +350,6 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
   if(flags->d_computeScaleFactor){
       d_mpm->scheduleComputeParticleScaleFactor(       sched, patches, matls);
   }
-  if(flags->d_refineParticles){
-      d_mpm->scheduleAddParticles(                     sched, patches, matls);
-  }
 
   if(d_analysisModules.size() != 0){
     vector<AnalysisModule*>::iterator iter;
