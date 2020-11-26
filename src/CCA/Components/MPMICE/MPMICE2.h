@@ -36,7 +36,6 @@
 #include <CCA/Components/Models/MultiMatlExchange/ExchangeModel.h>
 #include <CCA/Components/MPM/Materials/MPMMaterial.h>
 #include <CCA/Components/MPM/Materials/Contact/Contact.h>
-#include <CCA/Components/MPMICE/MPMICE.h>
 #include <CCA/Components/MPM/SerialMPM.h>
 #include <CCA/Components/MPM/RigidMPM.h>
 #include <CCA/Components/MPM/PhysicalBC/MPMPhysicalBC.h>
@@ -409,8 +408,6 @@ namespace Uintah {
         bool             d_rigidMPM;
         SerialMPM* d_mpm;
         ICE* d_ice;
-        MPMICE* d_mpmice;
-
         int              d_8or27;
         int              NGN;
         bool             d_testForNegTemps_mpm;
