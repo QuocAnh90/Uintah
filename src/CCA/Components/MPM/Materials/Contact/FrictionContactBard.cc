@@ -245,9 +245,12 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
                   double tangentDeltaVelocity=Dot(deltaVelocity,surfaceTangent);
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
-                  if (d_Modified_friction > 0 && gMu[n][c] > 0) {
-                      double frictionCoefficient =
-                          Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+                  if (d_Modified_friction > 0) {
+                      if (gMu[n][c] > 0) {
+                          double frictionCoefficient =
+                              Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+
+                      }
                   }
                   // Calculate velocity change needed to enforce contact
                   Dv = -normal_normaldV
@@ -448,10 +451,11 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
                   double frictionCoefficient=
                     Min(d_mu,tangentDeltaVelocity/fabs(normalDeltaVel));
 
-                  if (d_Modified_friction > 0 && gMu[n][c] > 0) {
-                      double frictionCoefficient =
-                          Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
-
+                  if (d_Modified_friction > 0) {
+                      if (gMu[n][c] > 0) {
+                          double frictionCoefficient =
+                              Min(d_mu, d_beta * gMu[n][c], tangentDeltaVelocity / fabs(normalDeltaVel));
+                      }
                   }
                   // Calculate velocity change needed to enforce contact
                   Dv= -normal_normaldV
