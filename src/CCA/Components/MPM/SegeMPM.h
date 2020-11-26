@@ -50,7 +50,7 @@
 
 
 namespace Uintah {
-
+class AnalysisModule;
 class MPM;
 class MPMLabel;
 class Output;
@@ -149,6 +149,8 @@ WARNING
   int              NGP;      // Number of ghost particles needed.
   int              NGN;      // Number of ghost nodes     needed.
   int              d_8or27;
+
+  std::vector<AnalysisModule*> d_analysisModules;
 
    private:
 
