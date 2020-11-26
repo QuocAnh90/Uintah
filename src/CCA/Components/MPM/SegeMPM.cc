@@ -123,10 +123,6 @@ SegeMPM::~SegeMPM()
   delete d_mpm;
   delete flags;
 
-  if (flags->d_doScalarDiffusion) {
-    delete d_sdInterfaceModel;
-  }
-
   MPMPhysicalBCFactory::clean();
 
   if(d_analysisModules.size() != 0){
@@ -137,10 +133,6 @@ SegeMPM::~SegeMPM()
       am->releaseComponents();
       delete am;
     }
-  }
-
-  if(d_switchCriteria) {
-    delete d_switchCriteria;
   }
 }
 
@@ -180,20 +172,11 @@ void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
         AnalysisModule* am = *iter;
         am->setComponents( dynamic_cast<ApplicationInterface*>( this ) );
         am->problemSetup(prob_spec,restart_prob_spec, grid,
-            d_mpm->d_mpmd_particleState, d_mpm->d_particleState_preReloc);
+            d_mpm->d_particleState, d_mpm->d_particleState_preReloc);
       }
     }
   }
 
-  //__________________________________
-  //  create the switching criteria port
-  d_mpm->d_switchCriteria = dynamic_cast<SwitchingCriteria*>(getPort("switch_criteria"));
-
-  if (d_switchCriteria) {
-    d_switchCriteria->problemSetup(restart_mat_ps,
-                                   restart_prob_spec, m_materialManager);
-  }
-}
 //______________________________________________________________________
 //
 void SegeMPM::outputProblemSpec(ProblemSpecP& root_ps)
@@ -246,7 +229,7 @@ void SegeMPM::scheduleTotalParticleCount(SchedulerP& sched,
                                            const PatchSet* patches,
                                            const MaterialSet* matls)
 {
-    d_mpm->scheduleTotalParticleCount(level, sched);
+    d_mpm->scheduleTotalParticleCount(sched, patches, matls);
 }
 //__________________________________
 //  Diagnostic task: compute the total number of particles
