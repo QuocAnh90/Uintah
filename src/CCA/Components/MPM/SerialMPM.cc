@@ -2342,6 +2342,7 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
                 new_dw->allocateAndPut(gMu, lb->gMuLabel, dwi, patch);
                 gMu.initialize(0);
             
+                cerr << gMu << endl;
 
             new_dw->get(pexternalforce, lb->pExtForceLabel_preReloc, pset);
             constParticleVariable<IntVector> pLoadCurveID;
@@ -2451,7 +2452,6 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
                         gvolume[node] += pvolume[idx] * S[k];
                         //            gColor[node]         += pColor[idx]*pmass[idx]         * S[k];
 
-                        gMu[node] = 0;
                         if (flags->d_Modified_base_friction) {
                             gMu[node] += pMu[idx] * S[k];
                         }
