@@ -922,7 +922,7 @@ double MohrCoulomb::computeRhoMicroCM(double pressure,
   return rho_cur;
 
 #if 1
-  cout << "NO VERSION OF computeRhoMicroCM EXISTS YET FOR MohrCoulomb" << endl;
+  //cout << "NO VERSION OF computeRhoMicroCM EXISTS YET FOR MohrCoulomb" << endl;
 #endif
 }
 
