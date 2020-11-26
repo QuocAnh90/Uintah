@@ -2451,6 +2451,7 @@ void SerialMPM::interpolateParticlesToGrid(const ProcessorGroup*,
                         gvolume[node] += pvolume[idx] * S[k];
                         //            gColor[node]         += pColor[idx]*pmass[idx]         * S[k];
 
+                        gMu[node] = 0;
                         if (flags->d_Modified_base_friction) {
                             gMu[node] += pMu[idx] * S[k];
                         }
