@@ -173,10 +173,10 @@ void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
                                                       m_materialManager,
                                                       prob_spec);
 
-    if(d_mpmd_analysisModules.size() != 0){
+    if(d_mpm->d_analysisModules.size() != 0){
       vector<AnalysisModule*>::iterator iter;
-      for( iter  = d_mpmd_analysisModules.begin();
-           iter != d_mpmd_analysisModules.end(); iter++) {
+      for( iter  = d_mpm->d_analysisModules.begin();
+           iter != d_mpm->d_analysisModules.end(); iter++) {
         AnalysisModule* am = *iter;
         am->setComponents( dynamic_cast<ApplicationInterface*>( this ) );
         am->problemSetup(prob_spec,restart_prob_spec, grid,
@@ -206,8 +206,8 @@ void SegeMPM::outputProblemSpec(ProblemSpecP& root_ps)
   if(!flags->d_with_ice && !flags->d_with_arches && d_mpm->d_analysisModules.size() != 0){
 
     vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
+    for( iter  = d_mpm->d_analysisModules.begin();
+         iter != d_mpm->d_analysisModules.end(); iter++){
       AnalysisModule* am = *iter;
 
       am->outputProblemSpec( root_ps );
@@ -354,10 +354,10 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
       d_mpm->scheduleAddParticles(                     sched, patches, matls);
   }
 
-  if(d_analysisModules.size() != 0){
+  if(d_mpm->d_analysisModules.size() != 0){
     vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
+    for( iter  = d_mpm->d_analysisModules.begin();
+         iter != d_mpm->d_analysisModules.end(); iter++){
       AnalysisModule* am = *iter;
       am->scheduleDoAnalysis_preReloc( sched, level);
     }
@@ -379,10 +379,10 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
 
   //__________________________________
   //  on the fly analysis
-  if(d_analysisModules.size() != 0){
+  if(d_mpm->d_analysisModules.size() != 0){
     vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
+    for( iter  = d_mpm->d_analysisModules.begin();
+         iter != d_mpm->d_analysisModules.end(); iter++){
       AnalysisModule* am = *iter;
       am->scheduleDoAnalysis( sched, level);
     }
