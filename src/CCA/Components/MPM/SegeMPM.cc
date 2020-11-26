@@ -110,31 +110,17 @@ SegeMPM::SegeMPM( const ProcessorGroup* myworld,
 {
 
   d_mpm = scinew SerialMPM(myworld, m_materialManager);
+  Mlb = d_mpm->lb;
 
   d_nextOutputTime=0.;
   d_SMALL_NUM_MPM=1e-200;
-  contactModel        = 0;
-  thermalContactModel = 0;
-  heatConductionModel = 0;
   NGP     = 1;
   NGN     = 1;
-  d_loadCurveIndex=0;
-  d_switchCriteria = 0;
-
-  d_fracture = false;
-
-  // Diffusion related
-  d_fluxBC = nullptr;
-  d_sdInterfaceModel = nullptr;
 }
 
 SegeMPM::~SegeMPM()
 {
-  delete contactModel;
-  delete thermalContactModel;
-  delete heatConductionModel;
   delete d_mpm;
-  delete d_fluxBC;
 
   if (d_mpm->flags->d_doScalarDiffusion) {
     delete d_sdInterfaceModel;
@@ -181,26 +167,26 @@ void SegeMPM::problemSetup(const ProblemSpecP& prob_spec,
   //__________________________________
   //  create analysis modules
   // call problemSetup
-  if(!flags->d_with_ice && !flags->d_with_arches){ // mpmice or mpmarches handles this
-    d_analysisModules = AnalysisModuleFactory::create(d_myworld,
+  if(!d_mpm->flags->d_with_ice && !d_mpm->flags->d_with_arches){ // mpmice or mpmarches handles this
+      d_mpm->d_analysisModules = AnalysisModuleFactory::create(d_myworld,
                                                       m_materialManager,
                                                       prob_spec);
 
-    if(d_analysisModules.size() != 0){
+    if(d_mpmd_analysisModules.size() != 0){
       vector<AnalysisModule*>::iterator iter;
-      for( iter  = d_analysisModules.begin();
-           iter != d_analysisModules.end(); iter++) {
+      for( iter  = d_mpmd_analysisModules.begin();
+           iter != d_mpmd_analysisModules.end(); iter++) {
         AnalysisModule* am = *iter;
         am->setComponents( dynamic_cast<ApplicationInterface*>( this ) );
         am->problemSetup(prob_spec,restart_prob_spec, grid,
-                         d_particleState, d_particleState_preReloc);
+            d_mpm->d_mpmd_particleState, d_mpm->d_particleState_preReloc);
       }
     }
   }
 
   //__________________________________
   //  create the switching criteria port
-  d_switchCriteria = dynamic_cast<SwitchingCriteria*>(getPort("switch_criteria"));
+  d_mpm->d_switchCriteria = dynamic_cast<SwitchingCriteria*>(getPort("switch_criteria"));
 
   if (d_switchCriteria) {
     d_switchCriteria->problemSetup(restart_mat_ps,
@@ -216,7 +202,7 @@ void SegeMPM::outputProblemSpec(ProblemSpecP& root_ps)
 
   //__________________________________
   //  output data analysis modules. Mpmice or mpmarches handles this
-  if(!flags->d_with_ice && !flags->d_with_arches && d_analysisModules.size() != 0){
+  if(!d_mpm->flags->d_with_ice && !d_mpm->flags->d_with_arches && d_analysisModules.size() != 0){
 
     vector<AnalysisModule*>::iterator iter;
     for( iter  = d_analysisModules.begin();
@@ -242,23 +228,6 @@ void SegeMPM::scheduleInitialize(const LevelP& level,
 void SegeMPM::scheduleRestartInitialize(const LevelP& level,
                                           SchedulerP& sched)
 {
-}
-/* _____________________________________________________________________
- Purpose:   Set variables that are normally set during the initialization
-            phase, but get wiped clean when you restart
-_____________________________________________________________________*/
-void SegeMPM::restartInitialize()
-{
-  cout_doing<<"Doing restartInitialize\t\t\t\t\t MPM"<<endl;
-
-  if(d_analysisModules.size() != 0){
-    vector<AnalysisModule*>::iterator iter;
-    for( iter  = d_analysisModules.begin();
-         iter != d_analysisModules.end(); iter++){
-      AnalysisModule* am = *iter;
-      am->restartInitialize();
-    }
-  }
 }
 
 //______________________________________________________________________
@@ -308,7 +277,7 @@ void
 SegeMPM::scheduleTimeAdvance(const LevelP & level,
                                SchedulerP   & sched)
 {
-  if (!flags->doMPMOnLevel(level->getIndex(), level->getGrid()->numLevels()))
+  if (!d_mpm->flags->doMPMOnLevel(level->getIndex(), level->getGrid()->numLevels()))
     return;
 
   const PatchSet* patches = level->eachPatch();
@@ -395,18 +364,18 @@ SegeMPM::scheduleTimeAdvance(const LevelP & level,
     }
   }
 
-  sched->scheduleParticleRelocation(level, flags->lb->pXLabel_preReloc,
+  sched->scheduleParticleRelocation(level, Mlb->pXLabel_preReloc,
                                     d_particleState_preReloc,
-      flags->lb->pXLabel,
+      Mlb->pXLabel,
                                     d_particleState,
-      flags->lb->pParticleIDLabel, matls, 1);
+      Mlb->pParticleIDLabel, matls, 1);
 
  if(d_mpm->flags->d_useCohesiveZones){
-  sched->scheduleParticleRelocation(level, flags->lb->pXLabel_preReloc,
+  sched->scheduleParticleRelocation(level, Mlb->pXLabel_preReloc,
                                     d_cohesiveZoneState_preReloc,
-      flags->lb->pXLabel,
+      Mlb->pXLabel,
                                     d_cohesiveZoneState,
-      flags->lb->czIDLabel, cz_matls,2);
+      Mlb->czIDLabel, cz_matls,2);
   }
 
   //__________________________________

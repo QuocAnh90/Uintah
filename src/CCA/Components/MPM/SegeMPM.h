@@ -128,6 +128,7 @@ WARNING
   friend class MPMICE2;
   friend class MPMArches;
   SerialMPM* d_mpm;
+  MPMLabel* Mlb;
 
   void scheduleInitializePressureBCs(const LevelP& level, SchedulerP&);
 
@@ -144,7 +145,8 @@ WARNING
   double           d_SMALL_NUM_MPM;
   int              NGP;      // Number of ghost particles needed.
   int              NGN;      // Number of ghost nodes     needed.
-  
+  int              d_8or27;
+
    private:
 
   SegeMPM(const SegeMPM&);
