@@ -107,6 +107,7 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
    // Need access to all velocity fields at once
    std::vector<constNCVariable<double> >  gmass(numMatls);
    std::vector<constNCVariable<double> >  gvolume(numMatls);
+   std::vector<constNCVariable<double> >  gMu(numMatls);
    std::vector<constNCVariable<Point> >   gposition(numMatls);
    std::vector<constNCVariable<Vector> >  gsurfnorm(numMatls);
    std::vector<constNCVariable<double> >  gnormtraction(numMatls);
@@ -135,7 +136,11 @@ void FrictionContactBard::exMomInterpolated(const ProcessorGroup*,
       new_dw->get(gposition[m],      lb->gPositionLabel, dwi, patch, gnone, 0);
       new_dw->get(gnormtraction[m],  lb->gNormTractionLabel,
                                                          dwi, patch, gnone, 0);
-      new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
+
+      if (d_Modified_friction>0)
+      {
+          new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
+      }
 
       new_dw->getModifiable(gvelocity[m],   lb->gVelocityLabel,      dwi,patch);
       new_dw->getModifiable(frictionWork[m],lb->frictionalWorkLabel, dwi,patch);
@@ -330,7 +335,11 @@ void FrictionContactBard::exMomIntegrated(const ProcessorGroup*,
                             dwi, patch);
       new_dw->getModifiable(frictionWork[m], lb->frictionalWorkLabel,
                             dwi, patch);
-      new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
+
+      if (d_Modified_friction>0)
+      {
+          new_dw->get(gMu[m], lb->gMuLabel, dwi, patch, gnone, 0);
+      }
     }
 
     delt_vartype delT;
